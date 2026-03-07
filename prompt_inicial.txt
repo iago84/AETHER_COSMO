@@ -1,0 +1,604 @@
+Sí. Aquí tienes un prompt técnico, largo y utilizable para pedir a una IA de desarrollo que construya el sistema informático completo alrededor de la tesis “La memoria del Aether”.
+
+Lo he planteado como una plataforma científico-técnica modular, no como un juguete visual. Debe servir para:
+
+modelado matemático,
+
+simulación,
+
+análisis de datos cosmológicos,
+
+detección de anomalías con IA,
+
+exploración de hipótesis,
+
+generación de informes,
+
+y futura publicación científica.
+
+Actúa como un arquitecto senior de software científico, físico computacional, ingeniero de IA, diseñador de sistemas de visualización y desarrollador full-stack.
+
+Quiero que diseñes e implementes un sistema informático completo llamado:
+
+AETHERLAB
+Subtítulo: Plataforma de simulación, análisis y exploración del campo de memoria del Aether
+
+CONTEXTO GENERAL
+El sistema debe materializar una hipótesis de investigación llamada “La memoria del Aether”, entendida como un campo informacional fenomenológico que podría registrar huellas físicas, energéticas y estructurales del universo.
+
+IMPORTANTE:
+- No presentar la hipótesis como ciencia confirmada.
+- Distinguir siempre entre:
+  1. física establecida,
+  2. modelo fenomenológico propuesto,
+  3. especulación exploratoria.
+- El sistema debe ser serio, modular, extensible y útil para investigación computacional real.
+
+OBJETIVO DEL SISTEMA
+Construir una plataforma científica que permita:
+1. Definir y ejecutar simulaciones del campo Aether.
+2. Modelar eventos físicos que “escriben” memoria en el campo.
+3. Visualizar la evolución del campo en 2D y 3D.
+4. Ingerir datasets reales (Planck, LIGO/GWOSC, SDSS y otros).
+5. Aplicar IA para detectar anomalías, patrones residuales y correlaciones.
+6. Gestionar experimentos, parámetros, versiones y resultados.
+7. Exportar informes técnicos, figuras y tablas.
+8. Servir como base futura para papers, tesis, notebooks y paneles de análisis.
+
+NOMBRE DE LOS MÓDULOS PRINCIPALES
+- aether-core
+- aether-sim
+- aether-physics
+- aether-ai
+- aether-data
+- aether-viz
+- aether-report
+- aether-ui
+- aether-api
+
+STACK TECNOLÓGICO PREFERIDO
+Backend:
+- Python 3.11+
+- FastAPI
+- Pydantic
+- SQLAlchemy
+- PostgreSQL
+- Redis opcional para colas/cache
+- Celery o RQ para tareas pesadas
+
+Cálculo científico:
+- NumPy
+- SciPy
+- xarray
+- h5py
+- pandas
+- sympy opcional
+- PyTorch para IA
+- scikit-learn para baseline
+- networkx para grafos
+- CuPy opcional si hay GPU
+
+Visualización:
+- PyQt6 para app de escritorio científica
+- PyVista o VisPy para 3D
+- Matplotlib para figuras académicas
+- Plotly opcional para dashboard web
+
+Frontend web opcional:
+- React + TypeScript
+- Tailwind
+- interfaz científica sobria, clara y técnica
+
+Formato de datos:
+- HDF5
+- Parquet
+- JSON/YAML para configuraciones
+- NetCDF opcional si encaja
+
+Arquitectura:
+- monorepo limpio o repos separados bien definidos
+- dockerización completa
+- tests unitarios y de integración
+- documentación técnica con MkDocs o Sphinx
+
+ARQUITECTURA GENERAL
+Quiero una arquitectura modular con separación clara de responsabilidades.
+
+1) MÓDULO aether-core
+Responsabilidades:
+- entidades base del dominio
+- configuraciones
+- tipos y esquemas
+- utilidades numéricas
+- sistema de unidades
+- validación de parámetros físicos
+- logging científico
+
+Debe incluir:
+- models.py o schemas.py con:
+  - SimulationConfig
+  - EventConfig
+  - AetherFieldConfig
+  - DatasetConfig
+  - ExperimentConfig
+  - TrainingConfig
+  - ReportConfig
+- sistema de unidades y metadata
+- serialización/deserialización
+- versionado de configuración de experimentos
+
+2) MÓDULO aether-physics
+Responsabilidades:
+- formalización del modelo fenomenológico
+- ecuaciones de evolución del campo
+- términos de fuente
+- operadores diferenciales
+- métricas base simplificadas
+- ruido cuántico fenomenológico
+- eventos astrofísicos
+
+Modelo base a implementar:
+Campo A(x,t) o A(x,y,z,t)
+Ecuación inicial de trabajo:
+□A + λA = α(TμνTμν) + βR² + γQ
+y también una versión simplificada computacional:
+∂A/∂t = S(x,t) - λA + D∇²A + N(x,t)
+
+Quiero:
+- implementación de ambas capas:
+  1. modelo teórico simbólico/documentado
+  2. modelo numérico simplificado ejecutable
+- documentación interna de qué parte es formal y qué parte es aproximación
+- varios tipos de fuentes S(x,t):
+  - supernova
+  - fusión de agujeros negros
+  - pulso puntual
+  - ruido estocástico
+  - fuente periódica
+  - fuente importada desde dataset
+- varios kernels espaciales:
+  - gaussiano
+  - exponencial
+  - lorentziano
+  - top-hat
+- varios regímenes de disipación:
+  - memoria corta
+  - media
+  - larga
+  - casi permanente
+
+3) MÓDULO aether-sim
+Responsabilidades:
+- motor de simulación
+- gestión temporal
+- stepping numérico
+- mallado 2D/3D
+- escenarios
+- ejecución reproducible
+
+Quiero:
+- simulador 2D completamente funcional desde el principio
+- base preparada para 3D después
+- integradores:
+  - Euler explícito
+  - Runge-Kutta
+  - opción semi-implícita si procede
+- condiciones de contorno:
+  - periódicas
+  - absorbentes
+  - fijas
+- escenarios predefinidos:
+  - vacío con ruido
+  - evento único
+  - múltiples eventos
+  - tren de eventos
+  - resonancia periódica
+  - campo con memoria casi permanente
+- guardado de snapshots
+- reproducción temporal
+- cálculo de métricas:
+  - energía efectiva del campo
+  - entropía aproximada
+  - persistencia temporal
+  - correlación espacial
+  - autocorrelación
+  - espectro de potencia
+  - mapa de máximos persistentes
+
+4) MÓDULO aether-data
+Responsabilidades:
+- ingestión y normalización de datasets reales
+- catálogos de eventos
+- pipelines ETL
+- almacenamiento local preparado para análisis reproducible
+
+Datasets objetivo:
+- Planck / CMB
+- GWOSC / LIGO-Virgo-KAGRA
+- Sloan Digital Sky Survey
+- catálogos de supernovas
+- efemérides JPL opcional para submódulo orbital
+
+Quiero:
+- adaptadores por dataset
+- dataset registry
+- metadata detallada
+- validación de integridad
+- caché local
+- pipeline reproducible
+- separación entre:
+  - raw/
+  - processed/
+  - features/
+  - experiments/
+- loaders listos para IA
+- función para crear datasets sintéticos de entrenamiento a partir del simulador
+
+5) MÓDULO aether-ai
+Responsabilidades:
+- detección de anomalías
+- clustering
+- aprendizaje no supervisado
+- comparación entre simulaciones y datos reales
+- ranking de candidatos interesantes
+
+Quiero implementar al menos:
+Baseline:
+- Isolation Forest
+- PCA + outlier scoring
+- DBSCAN / HDBSCAN
+- autoencoder básico
+
+Avanzado:
+- convolutional autoencoder para mapas 2D
+- transformer sencillo para series temporales
+- graph-based methods si se usa estructura de galaxias/eventos
+
+Funcionalidades:
+- pipeline de entrenamiento
+- evaluación
+- registro de experimentos
+- comparación de runs
+- exportación de métricas
+- mapas de anomalía
+- top-K regiones / ventanas anómalas
+- explainability básica:
+  - reconstrucción
+  - error maps
+  - embeddings 2D (UMAP/t-SNE)
+- sistema de hipótesis:
+  - “esta región presenta anomalía por exceso de correlación”
+  - “esta señal temporal tiene persistencia no típica”
+  - “este patrón se parece a firma sintética de memoria prolongada”
+
+6) MÓDULO aether-viz
+Responsabilidades:
+- visualización científica de alta calidad
+- figuras para tesis/paper
+- exploración interactiva
+
+Quiero:
+- heatmaps 2D del campo
+- volumen 3D si hay datos 3D
+- animaciones temporales
+- overlays de eventos sobre el campo
+- curvas temporales y espectros
+- vista comparada:
+  - simulación A
+  - simulación B
+  - dato real
+  - residuo
+- exportación a PNG/SVG/PDF/MP4
+- estética sobria y académica
+- soporte para escalas logarítmicas
+- colormaps científicos apropiados
+- generador automático de figuras para artículos
+
+7) MÓDULO aether-report
+Responsabilidades:
+- generación de informes técnicos y científicos
+- plantillas reproducibles
+
+Quiero:
+- exportación en Markdown, HTML, DOCX y PDF
+- informe de experimento con:
+  - parámetros
+  - objetivos
+  - resumen metodológico
+  - figuras
+  - tablas
+  - métricas
+  - observaciones
+  - limitaciones
+- plantillas:
+  - informe de simulación
+  - informe de entrenamiento IA
+  - informe de comparación dato real vs simulación
+  - borrador tipo paper
+- bibliografía y citas preparadas
+- historial de versiones
+
+8) MÓDULO aether-api
+Responsabilidades:
+- exponer el sistema vía API
+- permitir que otros módulos o UI consuman experimentos, datasets y resultados
+
+Quiero endpoints FastAPI para:
+- crear simulación
+- lanzar ejecución
+- listar datasets
+- registrar experimento
+- entrenar modelo
+- obtener métricas
+- obtener figuras
+- descargar resultados
+- comparar ejecuciones
+- consultar estado de jobs
+
+9) MÓDULO aether-ui
+Quiero dos interfaces:
+A) Desktop científica con PyQt6
+B) Web dashboard opcional
+
+A. PYQT6
+La app de escritorio debe ser la principal.
+Debe incluir:
+- menú de proyectos
+- panel lateral de configuración
+- visor central del campo
+- timeline
+- consola/log
+- pestañas:
+  - Simulación
+  - Datos reales
+  - IA
+  - Comparación
+  - Informes
+  - Configuración
+- editor de parámetros con validación
+- sistema de presets
+- carga/guardado de proyectos
+- exploración temporal con slider
+- selección de regiones de interés
+- generación de informe con botón
+- look & feel elegante, científico, oscuro, profesional
+
+B. WEB DASHBOARD
+Opcional, útil para monitorizar:
+- jobs
+- métricas
+- resultados
+- estado del sistema
+
+BASE DE DATOS
+Diseña un esquema PostgreSQL para:
+- projects
+- experiments
+- simulation_runs
+- datasets
+- model_runs
+- generated_reports
+- artifacts
+- figures
+- annotations
+- tags
+- experiment_versions
+
+Debe permitir:
+- auditoría
+- reproducibilidad
+- comparación entre ejecuciones
+- trazabilidad completa de parámetros
+
+FUNCIONALIDADES CLAVE
+1. Sistema de Proyectos
+- crear proyecto
+- agrupar simulaciones y análisis
+- notas del investigador
+- tags temáticos
+
+2. Sistema de Experimentos
+- clonar experimento
+- cambiar parámetros
+- re-ejecutar
+- comparar con runs previos
+
+3. Reproducibilidad
+- cada ejecución debe guardar:
+  - semilla
+  - versión del código
+  - parámetros exactos
+  - fecha
+  - hardware usado
+  - dataset usado
+
+4. Biblioteca de escenarios
+- ejemplos listos para usar
+- presets científicos
+- tutoriales integrados
+
+5. Biblioteca de hipótesis
+- cada análisis debe poder asociarse a una hipótesis textual
+- ejemplo:
+  - “el patrón es compatible con memoria larga”
+  - “la anomalía puede explicarse por ruido y no por memoria residual”
+- esto debe ayudar a construir pensamiento científico, no pseudociencia
+
+6. Motor comparativo
+- comparar:
+  - simulación vs simulación
+  - simulación vs dataset real
+  - dataset real vs baseline
+- mostrar:
+  - distancias
+  - similitud estructural
+  - correlaciones
+  - score de anomalía
+
+7. Sistema de plugins
+Quiero que sea extensible.
+Ejemplos de plugins futuros:
+- módulo orbital planetario
+- módulo de correlaciones históricas
+- módulo de teoría simbólica
+- módulo de papers y bibtex
+- módulo de experimentos cuánticos
+
+DIRECTORIOS DEL PROYECTO
+Quiero que generes una estructura profesional, por ejemplo:
+
+aetherlab/
+  apps/
+    api/
+    desktop/
+    web/
+  packages/
+    aether_core/
+    aether_physics/
+    aether_sim/
+    aether_data/
+    aether_ai/
+    aether_viz/
+    aether_report/
+  docs/
+  tests/
+  scripts/
+  infra/
+    docker/
+    ci/
+  data/
+    raw/
+    processed/
+    features/
+    outputs/
+  notebooks/
+
+ENTREGABLES QUE QUIERO DE TI
+Quiero que desarrolles esto paso a paso, pero dejando una base real y profesional.
+
+FASE 1
+- arquitectura completa del sistema
+- árbol de carpetas
+- README principal
+- documentos técnicos de arquitectura
+- esquema de base de datos
+- modelos Pydantic/ORM
+- roadmap de desarrollo
+
+FASE 2
+- implementación inicial funcional
+- simulador 2D del campo
+- API FastAPI mínima
+- UI PyQt6 mínima
+- guardado de proyectos y runs
+- visualización básica
+
+FASE 3
+- ingestión de datasets reales
+- pipelines ETL
+- baseline de IA
+- informes automáticos
+- comparación de runs
+
+FASE 4
+- IA avanzada
+- visualización 3D
+- plugins
+- optimización
+- docker compose
+- tests completos
+- documentación extendida
+
+ESTILO DE DESARROLLO
+- código limpio, tipado, documentado
+- separar claramente MVP y extensiones
+- comentarios útiles, no ruido
+- docstrings serios
+- diseño orientado a investigación y evolución futura
+- no hardcodear rutas
+- no mezclar lógica de dominio con UI
+- evitar pseudociencia en textos internos
+- usar lenguaje científico y prudente
+
+MUY IMPORTANTE
+En toda la documentación y UI:
+- usar expresiones como:
+  - “hipótesis de trabajo”
+  - “modelo fenomenológico”
+  - “exploración computacional”
+  - “no validado experimentalmente”
+- evitar presentar el sistema como prueba de que el Aether existe
+- el software debe ser una plataforma para investigar, no un aparato dogmático
+
+QUÉ QUIERO QUE GENERES AHORA
+Empieza generando, en este orden:
+
+1. visión general del sistema
+2. arquitectura modular detallada
+3. árbol de directorios completo
+4. esquema de base de datos
+5. modelos principales
+6. roadmap por fases
+7. MVP exacto
+8. riesgos técnicos y científicos
+9. propuesta de interfaz PyQt6
+10. lista de librerías y dependencias
+11. primer bloque de código base del proyecto
+
+Después continúa implementando el sistema de forma progresiva.
+No te quedes en ideas abstractas.
+Quiero diseño real, estructura real y código real.
+Cómo usar este prompt bien
+
+Te recomiendo lanzarlo en una IA de desarrollo tipo TRAE, Cursor, Claude Code o similar y pedirle primero:
+
+arquitectura + árbol + roadmap,
+
+luego repositorio base,
+
+luego MVP del simulador 2D + FastAPI + PyQt6.
+
+No intentes que te genere todo de un disparo porque eso suele parir un monstruo cojo: grande, bonito y roto.
+
+Orden inteligente de construcción
+
+El mejor orden para ti sería:
+
+aether-core
+
+aether-physics
+
+aether-sim
+
+aether-viz
+
+aether-api
+
+aether-ui
+
+aether-data
+
+aether-ai
+
+aether-report
+
+Así primero nace el corazón, luego el cuerpo, y luego los ojos.
+
+Extra: prompt corto de continuación
+
+Cuando la otra IA ya haya generado la base, usa este segundo prompt:
+
+Continúa desde la arquitectura ya creada y empieza la implementación real del MVP.
+
+Prioridades:
+1. simulador 2D funcional del campo Aether,
+2. persistencia de proyectos y runs en PostgreSQL,
+3. API FastAPI mínima,
+4. interfaz PyQt6 mínima con visor del campo,
+5. exportación de snapshots e informe básico.
+
+Quiero código ejecutable, bien estructurado, con typing, tests básicos, requirements, README de arranque y sin placeholders vacíos innecesarios.
+
+No reescribas toda la arquitectura; implementa.
+
+Si quieres, te preparo ahora un segundo prompt específico solo para PyQt6, o uno solo para backend + base de datos + API.

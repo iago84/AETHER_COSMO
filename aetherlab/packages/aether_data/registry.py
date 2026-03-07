@@ -1,0 +1,1 @@
+REGISTRY: dict[str, dict] = {}
