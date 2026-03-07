@@ -1,0 +1,9 @@
+aetherlab/apps/api/ @aetherlab-api
+aetherlab/apps/desktop/ @aetherlab-ui
+aetherlab/packages/aether_sim/ @aetherlab-sim
+aetherlab/packages/aether_core/ @aetherlab-core
+aetherlab/packages/aether_viz/ @aetherlab-viz
+docs/ @aetherlab-docs
+scripts/ @aetherlab-ops
+.github/ @aetherlab-ops
+* @aetherlab-maintainers

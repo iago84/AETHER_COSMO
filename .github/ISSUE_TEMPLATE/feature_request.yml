@@ -1,0 +1,38 @@
+name: "Solicitud de Funcionalidad"
+description: "Propón una mejora o nueva característica"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: "Describe qué problema resuelve y el enfoque propuesto."
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema a resolver
+      placeholder: "Es difícil monitorizar runs largos..."
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Propuesta
+      placeholder: "Añadir dashboard en UI con progreso y estimación..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas consideradas
+  - type: textarea
+    id: alcance
+    attributes:
+      label: Alcance
+      description: Qué módulos afecta (API, UI, simulador, métricas, infra)
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist de aceptación
+      options:
+        - label: Documentación actualizada
+        - label: Tests incluidos/pasan
+        - label: Sin romper compatibilidad
+        - label: Seguridad revisada (credenciales, rutas, inputs)

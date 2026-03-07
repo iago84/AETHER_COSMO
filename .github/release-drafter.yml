@@ -1,0 +1,27 @@
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+version-template: "$MAJOR.$MINOR.$PATCH"
+categories:
+  - title: "Nuevas características"
+    labels: ["enhancement", "feature"]
+  - title: "Correcciones"
+    labels: ["bug", "fix"]
+  - title: "Documentación"
+    labels: ["docs"]
+  - title: "Infraestructura"
+    labels: ["gh", "scripts"]
+  - title: "UI"
+    labels: ["ui"]
+  - title: "API"
+    labels: ["api"]
+  - title: "Simulador/Métricas"
+    labels: ["simulator"]
+  - title: "Core"
+    labels: ["core"]
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+template: |
+  Cambios incluidos en esta versión:
+
+  $CHANGES
+
+  Agradecimientos a quienes contribuyeron a este release.

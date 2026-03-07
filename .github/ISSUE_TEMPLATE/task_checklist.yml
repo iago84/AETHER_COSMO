@@ -1,0 +1,85 @@
+name: "Checklist de Fases/Tareas"
+description: "Seguimiento de un trabajo por fases con subtareas"
+title: "[Task]: "
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: "Usa esta plantilla para planificar y seguir un trabajo por fases."
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: Objetivo
+      placeholder: "Ej. Exportar reporte HTML desde UI"
+    validations:
+      required: true
+  - type: checkboxes
+    id: planificacion
+    attributes:
+      label: Planificación
+      options:
+        - label: Definir alcance y criterios de aceptación
+        - label: Descomponer en tareas
+        - label: Estimar riesgos
+  - type: checkboxes
+    id: analisis
+    attributes:
+      label: Análisis
+      options:
+        - label: Backend ▸ Modelo de datos definido
+        - label: Backend ▸ Contratos/Endpoints acordados
+        - label: Frontend ▸ UX/UI bosquejado
+        - label: Infra ▸ Flujos CI/CD identificados
+  - type: checkboxes
+    id: implementacion
+    attributes:
+      label: Implementación
+      options:
+        - label: Backend ▸ DB/Modelos
+        - label: Backend ▸ Endpoints
+        - label: Frontend ▸ UI
+        - label: Frontend ▸ Interacción
+        - label: Infra ▸ Scripts/Workflows
+  - type: checkboxes
+    id: pruebas
+    attributes:
+      label: Pruebas
+      options:
+        - label: Unitarias ▸ Cobertura básica
+        - label: Integración ▸ Flujo crítico
+        - label: E2E ▸ Escenarios clave
+        - label: Rendimiento ▸ Métrica acordada
+  - type: checkboxes
+    id: documentacion
+    attributes:
+      label: Documentación
+      options:
+        - label: Usuario ▸ Manual actualizado
+        - label: Técnico ▸ Diseño y decisiones
+        - label: DevOps ▸ Operación y despliegue
+        - label: Changelog/README actualizado
+  - type: checkboxes
+    id: despliegue
+    attributes:
+      label: Despliegue
+      options:
+        - label: Variables de entorno validadas
+        - label: Migraciones/DB aplicadas
+        - label: Worker/Redis verificado (si aplica)
+        - label: Artefactos y permisos verificados
+  - type: checkboxes
+    id: seguimiento
+    attributes:
+      label: Seguimiento
+      options:
+        - label: Monitoreo básico activado
+        - label: Métricas/Alertas acordadas
+        - label: Tareas de mejora registradas
+  - type: textarea
+    id: subtareas
+    attributes:
+      label: Subtareas específicas
+      description: Lista de subtareas adicionales y responsables
+      placeholder: "- [ ] Subtarea A (responsable)\n- [ ] Subtarea B (responsable)"
+    validations:
+      required: false

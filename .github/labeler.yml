@@ -1,0 +1,17 @@
+api:
+  - aetherlab/apps/api/**/*
+ui:
+  - aetherlab/apps/desktop/**/*
+simulator:
+  - aetherlab/packages/aether_sim/**/*
+core:
+  - aetherlab/packages/aether_core/**/*
+viz:
+  - aetherlab/packages/aether_viz/**/*
+docs:
+  - docs/**/*
+  - README.md
+scripts:
+  - scripts/**/*
+gh:
+  - .github/**/*

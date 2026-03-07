@@ -1,0 +1,59 @@
+name: "Reporte de Bug"
+description: "Reporta un fallo encontrado en AETHERLAB"
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Gracias por reportar un bug. Por favor completa la información."
+  - type: textarea
+    id: resumen
+    attributes:
+      label: Resumen
+      description: Descripción breve del problema
+      placeholder: "El espectro radial devuelve valores NaN..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproducir
+    attributes:
+      label: Pasos para reproducir
+      description: Proporciona pasos mínimos para reproducir
+      placeholder: "1) Ejecutar ...\n2) Llamar a /figures/{id}/spectrum...\n3) ..."
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Comportamiento esperado
+      placeholder: "Debe devolver un vector k y ps finitos..."
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportamiento actual
+      placeholder: "Se produce HTTP 500 con traza..."
+  - type: dropdown
+    id: componente
+    attributes:
+      label: Componente
+      options:
+        - API
+        - UI (PyQt6)
+        - Simulador
+        - Métricas
+        - Infra (RQ/Redis/DB)
+  - type: input
+    id: version
+    attributes:
+      label: Versión/commit
+      placeholder: "0.1.0 o hash"
+  - type: textarea
+    id: entorno
+    attributes:
+      label: Entorno
+      description: SO, Python, DB, REDIS_URL, etc.
+  - type: textarea
+    id: adjuntos
+    attributes:
+      label: Adjuntos
+      description: Logs, capturas, artefactos relevantes
