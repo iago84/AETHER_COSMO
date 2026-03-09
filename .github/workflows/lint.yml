@@ -15,6 +15,5 @@ jobs:
           python-version: "3.11"
       - name: Install ruff
         run: pip install ruff
-      - name: Run ruff (non-blocking)
-        continue-on-error: true
+      - name: Run ruff (blocking)
         run: ruff check .

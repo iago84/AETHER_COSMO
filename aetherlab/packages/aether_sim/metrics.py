@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def corrcoef2d(a: np.ndarray, b: np.ndarray) -> float:
     a0 = a - a.mean()
     b0 = b - b.mean()
@@ -9,8 +10,9 @@ def corrcoef2d(a: np.ndarray, b: np.ndarray) -> float:
         return 0.0
     return float((a0 * b0).mean() / (sa * sb))
 
+
 def compute_metrics(u: np.ndarray) -> dict:
-    energy = float(np.mean(u ** 2))
+    energy = float(np.mean(u**2))
     mean = float(np.mean(u))
     var = float(np.var(u))
     cx = corrcoef2d(u, np.roll(u, 1, axis=1))
@@ -23,6 +25,7 @@ def compute_metrics(u: np.ndarray) -> dict:
         "spatial_corr": spatial_corr,
     }
 
+
 def autocorr2d(u: np.ndarray, normalize: bool = True) -> np.ndarray:
     u0 = u - np.mean(u)
     F = np.fft.fft2(u0)
@@ -32,6 +35,7 @@ def autocorr2d(u: np.ndarray, normalize: bool = True) -> np.ndarray:
         denom = (u.size * np.var(u)) if np.var(u) > 0 else u.size
         ac = ac / denom
     return ac.astype(np.float32)
+
 
 def radial_profile(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     ny, nx = data.shape
@@ -47,6 +51,7 @@ def radial_profile(data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     k = np.arange(r_max + 1)[valid].astype(np.float32)
     prof = (sums[valid] / counts[valid]).astype(np.float32)
     return k, prof
+
 
 def power_spectrum_radial(u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     F = np.fft.fft2(u)

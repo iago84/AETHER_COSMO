@@ -1,9 +1,10 @@
 fastapi
-        uvicorn
-        pydantic
-        SQLAlchemy>=2.0
-        numpy
-        matplotlib
-        PyQt6
+uvicorn
+pydantic>=2.0
+SQLAlchemy>=2.0
+numpy
+matplotlib
+PyQt6
 redis
 rq
+psycopg2-binary

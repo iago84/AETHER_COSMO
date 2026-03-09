@@ -1,35 +1,48 @@
-from fastapi import FastAPI, Depends, BackgroundTasks, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-from .db import get_session
-from aetherlab.packages.aether_core.models_db import Base, Project, Experiment, SimulationRun
-from aetherlab.packages.aether_core.db import ENGINE, SessionLocal, ensure_schema
-from aetherlab.packages.aether_sim.simulator2d import Simulator2D
-from aetherlab.packages.aether_sim.sources import gaussian_pulse, periodic_gaussian, stochastic, top_hat, lorentzian
-from aetherlab.packages.aether_sim.metrics import compute_metrics, power_spectrum_radial, autocorr2d
-from aetherlab.packages.aether_viz.plots import show_field
-from pathlib import Path
-import time
-from starlette.responses import FileResponse
 import json
-import numpy as np
 import os
+import time
+from pathlib import Path
+
+import numpy as np
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from starlette.responses import FileResponse
+
+from aetherlab.packages.aether_core.db import ENGINE, SessionLocal, ensure_schema
+from aetherlab.packages.aether_core.models_db import Base, Experiment, Project, SimulationRun
+from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, power_spectrum_radial
+from aetherlab.packages.aether_sim.simulator2d import Simulator2D
+from aetherlab.packages.aether_sim.sources import (
+    gaussian_pulse,
+    lorentzian,
+    periodic_gaussian,
+    stochastic,
+    top_hat,
+)
+from aetherlab.packages.aether_viz.plots import show_field
+
+from .db import get_session
 
 app = FastAPI(title="AETHERLAB API", version="0.1.0")
+
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=ENGINE)
     ensure_schema()
 
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
+
 class ProjectIn(BaseModel):
     name: str
     description: str | None = None
+
 
 @app.post("/projects")
 def create_project(payload: ProjectIn, db: Session = Depends(get_session)):
@@ -39,14 +52,17 @@ def create_project(payload: ProjectIn, db: Session = Depends(get_session)):
     db.refresh(obj)
     return {"id": obj.id, "name": obj.name}
 
+
 @app.get("/projects")
 def list_projects(db: Session = Depends(get_session)):
     rows = db.execute(select(Project)).scalars().all()
     return [{"id": o.id, "name": o.name, "description": o.description} for o in rows]
 
+
 class ExperimentIn(BaseModel):
     project_id: int
     name: str
+
 
 @app.post("/experiments")
 def create_experiment(payload: ExperimentIn, db: Session = Depends(get_session)):
@@ -56,6 +72,7 @@ def create_experiment(payload: ExperimentIn, db: Session = Depends(get_session))
     db.refresh(obj)
     return {"id": obj.id, "name": obj.name, "project_id": obj.project_id}
 
+
 @app.get("/experiments")
 def list_experiments(project_id: int | None = None, db: Session = Depends(get_session)):
     stmt = select(Experiment)
@@ -64,17 +81,21 @@ def list_experiments(project_id: int | None = None, db: Session = Depends(get_se
     rows = db.execute(stmt).scalars().all()
     return [{"id": o.id, "name": o.name, "project_id": o.project_id} for o in rows]
 
+
 @app.post("/simulations")
 def create_simulation():
     return {"id": "sim-1"}
+
 
 @app.post("/simulations/{sim_id}/run")
 def run_simulation(sim_id: str):
     return {"sim_id": sim_id, "status": "queued"}
 
+
 @app.get("/simulations/{sim_id}/status")
 def status(sim_id: str):
     return {"sim_id": sim_id, "state": "unknown"}
+
 
 class SimpleSimRequest(BaseModel):
     experiment_id: int
@@ -98,29 +119,65 @@ class SimpleSimRequest(BaseModel):
     save_series: bool = False
     series_stride: int = 10
 
+
 @app.post("/simulate/simple")
 def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session)):
-    sim = Simulator2D(nx=payload.nx, ny=payload.ny, steps=payload.steps, dt=payload.dt, lam=payload.lam, diff=payload.diff, noise=payload.noise, seed=123, boundary=payload.boundary)  # type: ignore[arg-type]
+    sim = Simulator2D(
+        nx=payload.nx,
+        ny=payload.ny,
+        steps=payload.steps,
+        dt=payload.dt,
+        lam=payload.lam,
+        diff=payload.diff,
+        noise=payload.noise,
+        seed=123,
+        boundary=payload.boundary,
+    )  # type: ignore[arg-type]
     if payload.source_kind == "gaussian_pulse":
-        sim.set_source(lambda x, y, t: gaussian_pulse(x, y, t, payload.cx, payload.cy, sigma=payload.sigma, duration=payload.duration, amplitude=payload.amplitude))
+        sim.set_source(
+            lambda x, y, t: gaussian_pulse(
+                x,
+                y,
+                t,
+                payload.cx,
+                payload.cy,
+                sigma=payload.sigma,
+                duration=payload.duration,
+                amplitude=payload.amplitude,
+            )
+        )
     elif payload.source_kind == "periodic":
         f = payload.frequency or 1.0
-        sim.set_source(lambda x, y, t: periodic_gaussian(x, y, t, payload.cx, payload.cy, sigma=payload.sigma, amplitude=payload.amplitude, dt=payload.dt, freq=f))
+        sim.set_source(
+            lambda x, y, t: periodic_gaussian(
+                x, y, t, payload.cx, payload.cy, sigma=payload.sigma, amplitude=payload.amplitude, dt=payload.dt, freq=f
+            )
+        )
     elif payload.source_kind == "stochastic":
         sim.set_source(lambda x, y, t: stochastic(x, y, t, amplitude=payload.amplitude))
     elif payload.source_kind == "top_hat":
         r = payload.radius or 8.0
-        sim.set_source(lambda x, y, t: top_hat(x, y, t, payload.cx, payload.cy, radius=r, amplitude=payload.amplitude, duration=payload.duration))
+        sim.set_source(
+            lambda x, y, t: top_hat(
+                x, y, t, payload.cx, payload.cy, radius=r, amplitude=payload.amplitude, duration=payload.duration
+            )
+        )
     elif payload.source_kind == "lorentzian":
         g = payload.gamma or 8.0
-        sim.set_source(lambda x, y, t: lorentzian(x, y, t, payload.cx, payload.cy, gamma=g, amplitude=payload.amplitude, duration=payload.duration))
+        sim.set_source(
+            lambda x, y, t: lorentzian(
+                x, y, t, payload.cx, payload.cy, gamma=g, amplitude=payload.amplitude, duration=payload.duration
+            )
+        )
     else:
         sim.set_source(lambda x, y, t: np.zeros_like(x, dtype=np.float32))
     frames = []
     if payload.save_series:
+
         def cb(t, u):
             if t % max(1, payload.series_stride) == 0:
                 frames.append(u.copy())
+
         sim.run(callback=cb)
     else:
         sim.run()
@@ -144,6 +201,7 @@ def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session
     db.refresh(run)
     return {"run_id": run.id, "snapshot": run.snapshot_path}
 
+
 @app.get("/runs")
 def list_runs(
     experiment_id: int | None = None,
@@ -155,9 +213,16 @@ def list_runs(
         stmt = stmt.where(SimulationRun.experiment_id == experiment_id)
     rows = db.execute(stmt).scalars().all()[:limit]
     return [
-        {"id": r.id, "experiment_id": r.experiment_id, "status": r.status, "snapshot_path": r.snapshot_path, "created_at": str(r.created_at)}
+        {
+            "id": r.id,
+            "experiment_id": r.experiment_id,
+            "status": r.status,
+            "snapshot_path": r.snapshot_path,
+            "created_at": str(r.created_at),
+        }
         for r in rows
     ]
+
 
 @app.get("/runs/{run_id}")
 def get_run(run_id: int, db: Session = Depends(get_session)):
@@ -169,8 +234,9 @@ def get_run(run_id: int, db: Session = Depends(get_session)):
     job_id = getattr(obj, "job_id", None)
     if os.environ.get("REDIS_URL") and job_id and status != "finished":
         try:
-            from rq.job import Job
             import redis
+            from rq.job import Job
+
             url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
             conn = redis.from_url(url)
             job = Job.fetch(job_id, connection=conn)
@@ -185,10 +251,20 @@ def get_run(run_id: int, db: Session = Depends(get_session)):
                 status = "failed"
         except Exception:
             pass
-    return {"id": obj.id, "experiment_id": obj.experiment_id, "status": status, "snapshot_path": obj.snapshot_path, "created_at": str(obj.created_at), "backend": backend, "job_id": job_id}
+    return {
+        "id": obj.id,
+        "experiment_id": obj.experiment_id,
+        "status": status,
+        "snapshot_path": obj.snapshot_path,
+        "created_at": str(obj.created_at),
+        "backend": backend,
+        "job_id": job_id,
+    }
+
 
 class AsyncSimRequest(SimpleSimRequest):
     pass
+
 
 def _background_simulation(run_id: int, payload: AsyncSimRequest):
     db = SessionLocal()
@@ -198,27 +274,70 @@ def _background_simulation(run_id: int, payload: AsyncSimRequest):
             return
         run.status = "running"
         db.commit()
-        sim = Simulator2D(nx=payload.nx, ny=payload.ny, steps=payload.steps, dt=payload.dt, lam=payload.lam, diff=payload.diff, noise=payload.noise, seed=123, boundary=payload.boundary)  # type: ignore[arg-type]
+        sim = Simulator2D(
+            nx=payload.nx,
+            ny=payload.ny,
+            steps=payload.steps,
+            dt=payload.dt,
+            lam=payload.lam,
+            diff=payload.diff,
+            noise=payload.noise,
+            seed=123,
+            boundary=payload.boundary,
+        )  # type: ignore[arg-type]
         if payload.source_kind == "gaussian_pulse":
-            sim.set_source(lambda x, y, t: gaussian_pulse(x, y, t, payload.cx, payload.cy, sigma=payload.sigma, duration=payload.duration, amplitude=payload.amplitude))
+            sim.set_source(
+                lambda x, y, t: gaussian_pulse(
+                    x,
+                    y,
+                    t,
+                    payload.cx,
+                    payload.cy,
+                    sigma=payload.sigma,
+                    duration=payload.duration,
+                    amplitude=payload.amplitude,
+                )
+            )
         elif payload.source_kind == "periodic":
             f = payload.frequency or 1.0
-            sim.set_source(lambda x, y, t: periodic_gaussian(x, y, t, payload.cx, payload.cy, sigma=payload.sigma, amplitude=payload.amplitude, dt=payload.dt, freq=f))
+            sim.set_source(
+                lambda x, y, t: periodic_gaussian(
+                    x,
+                    y,
+                    t,
+                    payload.cx,
+                    payload.cy,
+                    sigma=payload.sigma,
+                    amplitude=payload.amplitude,
+                    dt=payload.dt,
+                    freq=f,
+                )
+            )
         elif payload.source_kind == "stochastic":
             sim.set_source(lambda x, y, t: stochastic(x, y, t, amplitude=payload.amplitude))
         elif payload.source_kind == "top_hat":
             r = payload.radius or 8.0
-            sim.set_source(lambda x, y, t: top_hat(x, y, t, payload.cx, payload.cy, radius=r, amplitude=payload.amplitude, duration=payload.duration))
+            sim.set_source(
+                lambda x, y, t: top_hat(
+                    x, y, t, payload.cx, payload.cy, radius=r, amplitude=payload.amplitude, duration=payload.duration
+                )
+            )
         elif payload.source_kind == "lorentzian":
             g = payload.gamma or 8.0
-            sim.set_source(lambda x, y, t: lorentzian(x, y, t, payload.cx, payload.cy, gamma=g, amplitude=payload.amplitude, duration=payload.duration))
+            sim.set_source(
+                lambda x, y, t: lorentzian(
+                    x, y, t, payload.cx, payload.cy, gamma=g, amplitude=payload.amplitude, duration=payload.duration
+                )
+            )
         else:
             sim.set_source(lambda x, y, t: np.zeros_like(x, dtype=np.float32))
         frames = []
         if payload.save_series:
+
             def cb(t, u):
                 if t % max(1, payload.series_stride) == 0:
                     frames.append(u.copy())
+
             sim.run(callback=cb)
         else:
             sim.run()
@@ -242,6 +361,7 @@ def _background_simulation(run_id: int, payload: AsyncSimRequest):
     finally:
         db.close()
 
+
 @app.post("/simulate/async")
 def simulate_async(payload: AsyncSimRequest, background: BackgroundTasks, db: Session = Depends(get_session)):
     use_rq = bool(os.environ.get("REDIS_URL"))
@@ -251,8 +371,9 @@ def simulate_async(payload: AsyncSimRequest, background: BackgroundTasks, db: Se
     db.refresh(run)
     if use_rq:
         try:
-            from rq import Queue
             import redis
+            from rq import Queue
+
             url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
             conn = redis.from_url(url)
             q = Queue("aetherlab", connection=conn)
@@ -267,6 +388,7 @@ def simulate_async(payload: AsyncSimRequest, background: BackgroundTasks, db: Se
         background.add_task(_background_simulation, run.id, payload)
         return {"run_id": run.id, "status": "queued", "backend": "background"}
 
+
 @app.post("/runs/{run_id}/abort")
 def abort_run(run_id: int, db: Session = Depends(get_session)):
     obj = db.get(SimulationRun, run_id)
@@ -275,8 +397,9 @@ def abort_run(run_id: int, db: Session = Depends(get_session)):
     if not obj.job_id or not os.environ.get("REDIS_URL"):
         raise HTTPException(status_code=400, detail="abort only available for RQ jobs")
     try:
-        from rq.job import Job
         import redis
+        from rq.job import Job
+
         url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         conn = redis.from_url(url)
         job = Job.fetch(obj.job_id, connection=conn)
@@ -287,6 +410,7 @@ def abort_run(run_id: int, db: Session = Depends(get_session)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/runs/{run_id}/retry")
 def retry_run(run_id: int, db: Session = Depends(get_session)):
     obj = db.get(SimulationRun, run_id)
@@ -295,20 +419,20 @@ def retry_run(run_id: int, db: Session = Depends(get_session)):
     if not obj.job_id or not os.environ.get("REDIS_URL"):
         raise HTTPException(status_code=400, detail="retry only available for RQ jobs")
     try:
-        from rq import Queue
-        from rq.job import Job
         import redis
+        from rq.job import Job
+
         url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         conn = redis.from_url(url)
         job = Job.fetch(obj.job_id, connection=conn)
         if job.is_failed:
-            q = Queue("aetherlab", connection=conn)
             job.requeue()
             obj.status = "queued"
             db.commit()
         return {"run_id": run_id, "status": obj.status}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/runs/{run_id}/cleanup")
 def cleanup_run_outputs(run_id: int, db: Session = Depends(get_session)):
@@ -325,9 +449,10 @@ def cleanup_run_outputs(run_id: int, db: Session = Depends(get_session)):
                 except Exception:
                     pass
         obj.snapshot_path = None
-        obj.status = (obj.status if obj.status not in ("finished","failed","cancelled") else "cleaned")
+        obj.status = obj.status if obj.status not in ("finished", "failed", "cancelled") else "cleaned"
         db.commit()
     return {"run_id": run_id, "status": obj.status, "snapshot_path": obj.snapshot_path}
+
 
 @app.get("/figures/{run_id}/snapshot")
 def download_snapshot(run_id: int, db: Session = Depends(get_session)):
@@ -338,6 +463,7 @@ def download_snapshot(run_id: int, db: Session = Depends(get_session)):
     if not p.exists():
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(p)
+
 
 @app.get("/figures/{run_id}/metrics")
 def get_metrics(run_id: int, db: Session = Depends(get_session)):
@@ -351,6 +477,7 @@ def get_metrics(run_id: int, db: Session = Depends(get_session)):
         data = json.load(f)
     return data
 
+
 @app.get("/figures/{run_id}/series")
 def download_series(run_id: int, db: Session = Depends(get_session)):
     obj = db.get(SimulationRun, run_id)
@@ -361,6 +488,7 @@ def download_series(run_id: int, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="series not found")
     return FileResponse(p)
 
+
 @app.get("/figures/{run_id}/field")
 def download_field(run_id: int, db: Session = Depends(get_session)):
     obj = db.get(SimulationRun, run_id)
@@ -370,6 +498,7 @@ def download_field(run_id: int, db: Session = Depends(get_session)):
     if not p.exists():
         raise HTTPException(status_code=404, detail="field not found")
     return FileResponse(p)
+
 
 @app.get("/figures/{run_id}/series-metrics")
 def download_series_metrics(run_id: int, db: Session = Depends(get_session)):
@@ -384,6 +513,7 @@ def download_series_metrics(run_id: int, db: Session = Depends(get_session)):
     series = [compute_metrics(fr) for fr in frames]
     return {"length": len(series), "series": series}
 
+
 def _load_field_for_run(obj: SimulationRun) -> np.ndarray:
     p = Path(obj.snapshot_path)
     npz = p.with_suffix(".npz")
@@ -395,6 +525,7 @@ def _load_field_for_run(obj: SimulationRun) -> np.ndarray:
     if npy.exists():
         return np.load(npy.as_posix())
     raise FileNotFoundError("no numeric field found")
+
 
 @app.get("/figures/{run_id}/spectrum")
 def get_spectrum(run_id: int, db: Session = Depends(get_session)):
@@ -408,6 +539,7 @@ def get_spectrum(run_id: int, db: Session = Depends(get_session)):
     k, ps = power_spectrum_radial(u)
     return {"k": k.tolist(), "ps": ps.tolist()}
 
+
 @app.get("/figures/{run_id}/autocorr")
 def get_autocorr(run_id: int, crop: int = Query(default=64, ge=8, le=512), db: Session = Depends(get_session)):
     obj = db.get(SimulationRun, run_id)
@@ -419,10 +551,12 @@ def get_autocorr(run_id: int, crop: int = Query(default=64, ge=8, le=512), db: S
         raise HTTPException(status_code=404, detail="field not found")
     ac = autocorr2d(u, normalize=True)
     h, w = ac.shape
-    c0 = h // 2; c1 = w // 2
+    c0 = h // 2
+    c1 = w // 2
     half = min(crop // 2, c0, c1)
-    cut = ac[c0 - half: c0 + half, c1 - half: c1 + half]
+    cut = ac[c0 - half : c0 + half, c1 - half : c1 + half]
     return {"crop": crop, "autocorr": cut.tolist()}
+
 
 @app.post("/runs/{run_id}/refresh")
 def refresh_run(run_id: int, db: Session = Depends(get_session)):

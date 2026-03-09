@@ -1,14 +1,22 @@
-from pathlib import Path
-import os
 import json
+import os
+from pathlib import Path
+
 import numpy as np
-from rq import Worker, Queue, Connection
 import redis
+from rq import Connection, Queue, Worker
+
 from aetherlab.packages.aether_core.db import SessionLocal
 from aetherlab.packages.aether_core.models_db import SimulationRun
-from aetherlab.packages.aether_sim.simulator2d import Simulator2D
-from aetherlab.packages.aether_sim.sources import gaussian_pulse, periodic_gaussian, stochastic, top_hat, lorentzian
 from aetherlab.packages.aether_sim.metrics import compute_metrics
+from aetherlab.packages.aether_sim.simulator2d import Simulator2D
+from aetherlab.packages.aether_sim.sources import (
+    gaussian_pulse,
+    lorentzian,
+    periodic_gaussian,
+    stochastic,
+    top_hat,
+)
 from aetherlab.packages.aether_viz.plots import show_field
 
 
@@ -44,9 +52,13 @@ def run_sim_job(payload: dict) -> dict:
         save_series = bool(payload.get("save_series", False))
         series_stride = int(payload.get("series_stride", 10))
         if sk == "gaussian_pulse":
-            sim.set_source(lambda x, y, t: gaussian_pulse(x, y, t, cx, cy, sigma=sigma, duration=duration, amplitude=amp))
+            sim.set_source(
+                lambda x, y, t: gaussian_pulse(x, y, t, cx, cy, sigma=sigma, duration=duration, amplitude=amp)
+            )
         elif sk == "periodic":
-            sim.set_source(lambda x, y, t: periodic_gaussian(x, y, t, cx, cy, sigma=sigma, amplitude=amp, dt=sim.dt, freq=freq))
+            sim.set_source(
+                lambda x, y, t: periodic_gaussian(x, y, t, cx, cy, sigma=sigma, amplitude=amp, dt=sim.dt, freq=freq)
+            )
         elif sk == "stochastic":
             sim.set_source(lambda x, y, t: stochastic(x, y, t, amplitude=amp))
         elif sk == "top_hat":
@@ -55,9 +67,11 @@ def run_sim_job(payload: dict) -> dict:
             sim.set_source(lambda x, y, t: lorentzian(x, y, t, cx, cy, gamma=gamma, amplitude=amp, duration=duration))
         frames = []
         if save_series:
+
             def cb(t, u):
                 if t % max(1, series_stride) == 0:
                     frames.append(u.copy())
+
             sim.run(callback=cb)
         else:
             sim.run()

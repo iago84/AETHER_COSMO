@@ -1,7 +1,8 @@
 import numpy as np
+
+from aetherlab.packages.aether_sim.metrics import compute_metrics
 from aetherlab.packages.aether_sim.simulator2d import Simulator2D
 from aetherlab.packages.aether_sim.sources import gaussian_pulse
-from aetherlab.packages.aether_sim.metrics import compute_metrics
 
 
 def test_simulator2d_smoke():
@@ -11,4 +12,3 @@ def test_simulator2d_smoke():
     m = compute_metrics(sim.u)
     assert "energy" in m and np.isfinite(m["energy"]) and m["energy"] >= 0.0
     assert "variance" in m and np.isfinite(m["variance"]) and m["variance"] >= 0.0
-

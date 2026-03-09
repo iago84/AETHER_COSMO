@@ -1,9 +1,11 @@
-from typing import Optional
 from datetime import datetime
-from sqlalchemy.orm import declarative_base, relationship, Mapped, mapped_column
-from sqlalchemy import String, Integer, ForeignKey, DateTime, func, Text
+from typing import Optional
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
 
 Base = declarative_base()
+
 
 class Project(Base):
     __tablename__ = "projects"
@@ -13,6 +15,7 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     experiments: Mapped[list["Experiment"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
+
 class Experiment(Base):
     __tablename__ = "experiments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -21,6 +24,7 @@ class Experiment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     project: Mapped["Project"] = relationship(back_populates="experiments")
     runs: Mapped[list["SimulationRun"]] = relationship(back_populates="experiment", cascade="all, delete-orphan")
+
 
 class SimulationRun(Base):
     __tablename__ = "simulation_runs"

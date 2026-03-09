@@ -1,12 +1,11 @@
 import argparse
 import json
-import os
+import subprocess
 import sys
 import time
-import subprocess
-from pathlib import Path
-import urllib.request
 import urllib.error
+import urllib.request
+from pathlib import Path
 
 from scripts.report_html import build_report
 
@@ -78,7 +77,6 @@ def simulate_and_report(base: str, experiment_id: int, outfile: str, crop: int) 
 
 def launch_api(host: str, port: int) -> subprocess.Popen:
     cmd = [sys.executable, "-m", "uvicorn", "aetherlab.apps.api.main:app", "--host", host, "--port", str(port)]
-    env = os.environ.copy()
     return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 

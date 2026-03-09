@@ -1,8 +1,7 @@
-from pathlib import Path
-from textwrap import dedent
 import argparse
 import sys
-import os
+from pathlib import Path
+from textwrap import dedent
 
 
 def write(path: Path, content: str, overwrite: bool = False) -> None:
@@ -358,7 +357,15 @@ def build(mode: str, root: Path, overwrite: bool) -> None:
     for p, content in files.items():
         write(p, content + ("\n" if not content.endswith("\n") else ""), overwrite=overwrite)
     packages_root = base / "packages"
-    for pkg in ["aether_core", "aether_physics", "aether_sim", "aether_viz", "aether_data", "aether_ai", "aether_report"]:
+    for pkg in [
+        "aether_core",
+        "aether_physics",
+        "aether_sim",
+        "aether_viz",
+        "aether_data",
+        "aether_ai",
+        "aether_report",
+    ]:
         pkg_path = packages_root / pkg
         if pkg_path.exists():
             ensure_pkg(pkg_path)

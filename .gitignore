@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+ENV/
+env/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# IDE/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Project outputs
+aetherlab/data/outputs/
+reports/*.html
+*.npz
+*.npy
+*.png
+
+# Node (if web dashboard used)
+node_modules/
+dist/
+build/

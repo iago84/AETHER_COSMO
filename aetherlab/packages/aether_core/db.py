@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-import os
+
 
 def default_sqlite_url(root: str | None = None) -> str:
     if root is None:
@@ -10,12 +12,15 @@ def default_sqlite_url(root: str | None = None) -> str:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return f"sqlite+pysqlite:///{db_path.as_posix()}"
 
+
 def make_engine():
     url = os.environ.get("AETHERLAB_DB_URL") or default_sqlite_url()
     return create_engine(url, future=True)
 
+
 ENGINE = make_engine()
 SessionLocal = sessionmaker(bind=ENGINE, autoflush=False, autocommit=False, future=True)
+
 
 def ensure_schema():
     try:

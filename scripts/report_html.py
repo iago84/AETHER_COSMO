@@ -2,9 +2,10 @@ import argparse
 import base64
 import io
 import json
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
+
 import numpy as np
 from matplotlib.figure import Figure
 
@@ -19,7 +20,10 @@ def _png_from_spectrum(k, ps) -> bytes:
     fig = Figure(figsize=(5, 3), dpi=120)
     ax = fig.add_subplot(111)
     ax.plot(k, ps, label="Espectro radial")
-    ax.set_xlabel("k"); ax.set_ylabel("potencia"); ax.grid(True); ax.legend()
+    ax.set_xlabel("k")
+    ax.set_ylabel("potencia")
+    ax.grid(True)
+    ax.legend()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight")
     return buf.getvalue()
@@ -40,7 +44,10 @@ def _png_from_energy(series_metrics: list[dict]) -> bytes:
     fig = Figure(figsize=(5, 3), dpi=120)
     ax = fig.add_subplot(111)
     ax.plot(np.arange(len(e)), e, label="Energía")
-    ax.set_xlabel("frame"); ax.set_ylabel("energía"); ax.grid(True); ax.legend()
+    ax.set_xlabel("frame")
+    ax.set_ylabel("energía")
+    ax.grid(True)
+    ax.legend()
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight")
     return buf.getvalue()

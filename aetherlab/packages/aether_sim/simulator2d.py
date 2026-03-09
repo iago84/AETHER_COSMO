@@ -1,9 +1,23 @@
-from typing import Callable, Optional, Literal
+from typing import Callable, Literal, Optional
+
 import numpy as np
+
 from aetherlab.packages.aether_physics.numerics import update
 
+
 class Simulator2D:
-    def __init__(self, nx: int = 128, ny: int = 128, dt: float = 0.01, steps: int = 1000, lam: float = 1.0, diff: float = 0.1, noise: float = 0.0, seed: int | None = None, boundary: Literal["periodic","fixed","absorbing"] = "periodic"):
+    def __init__(
+        self,
+        nx: int = 128,
+        ny: int = 128,
+        dt: float = 0.01,
+        steps: int = 1000,
+        lam: float = 1.0,
+        diff: float = 0.1,
+        noise: float = 0.0,
+        seed: int | None = None,
+        boundary: Literal["periodic", "fixed", "absorbing"] = "periodic",
+    ):
         self.nx = nx
         self.ny = ny
         self.dt = dt
@@ -25,7 +39,7 @@ class Simulator2D:
             y, x = np.mgrid[0 : self.ny, 0 : self.nx]
             self.source[:] = self.source_func(x, y, t)
         self.u = update(self.u, self.source, self.lam, self.diff, self.dt, self.noise, self.rng)
-        if self.boundary in ("fixed","absorbing"):
+        if self.boundary in ("fixed", "absorbing"):
             # Dirichlet-like boundary as approximation
             self.u[0, :] = 0.0
             self.u[-1, :] = 0.0
