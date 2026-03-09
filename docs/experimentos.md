@@ -62,6 +62,44 @@
 5) Exportar CSV/HTML y revisar figuras y métricas.
 6) Documentar hipótesis asociada y observaciones.
 
+## Plantilla de Ficha de Experimento
+- Identificación:
+  - Proyecto / Experimento / Fecha / Autor
+- Hipótesis de trabajo:
+  - Describir la hipótesis asociada (lenguaje prudente, no concluyente)
+- Objetivo:
+  - Qué patrón/efecto se busca observar/cuantar
+- Parámetros de simulación (si aplica):
+  - nx, ny, dt, steps, boundary, source_kind, {sigma|gamma|radius|amplitude}, lam, diff, noise
+- Datasets vinculados (si aplica):
+  - Lista de `dataset_id`, nombre, path de origen y preprocesado (ETL)
+- Protocolo:
+  - Pasos ejecutados (endpoints, opciones de UI, orden)
+- Métricas y figuras:
+  - Energía vs tiempo, espectro radial (lineal/log), autocorrelación 2D (crop)
+  - Enlaces a artefactos: PNG/NPY/NPZ/CSV (ruta relativa bajo `aetherlab/data`)
+- Resultados IA:
+  - Método (isoforest|mean_dist|dbscan), parámetros, ruta CSV y resumen de scores
+- Observaciones:
+  - Hallazgos cualitativos y cuantitativos; discrepancias; próximos pasos
+- Limitaciones:
+  - Suposiciones del modelo numérico y del ETL; fuentes de error
+- Reproducibilidad:
+  - Seed, versión de código, versión de datasets, hardware, tiempos
+
+## Ejemplo de reporte (estructura)
+- Resumen:
+  - Breve descripción del objetivo y del setup
+- Figuras:
+  - Snapshot (PNG) del campo
+  - Energía vs tiempo (PNG/CSV)
+  - Espectro radial (PNG) e interpretación
+  - Autocorrelación 2D (PNG) con distinto `crop`
+- Datos:
+  - Enlaces a NPZ/NPY de serie/campo y CSV de IA
+- Conclusiones:
+  - Qué se observó, qué falta por validar, próximos experimentos
+
 ## Protocolo de ejecución
 1) Crear experimento y configurar parámetros (UI o API).
 2) Activar `save_series=true` con `series_stride` adecuado.
