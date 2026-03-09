@@ -18,6 +18,7 @@ from aetherlab.packages.aether_core.models_db import (
     ExperimentDataset,
     ModelRun,
     Project,
+    Artifact,
     SimulationRun,
 )
 from aetherlab.packages.aether_data.registry import get as get_dataset, list_datasets
@@ -551,6 +552,34 @@ def get_spectrum(run_id: int, db: Session = Depends(get_session)):
     return {"k": k.tolist(), "ps": ps.tolist()}
 
 
+@app.get("/figures/{run_id}/spectrum-roi")
+def get_spectrum_roi(
+    run_id: int,
+    x0: int = Query(ge=0),
+    y0: int = Query(ge=0),
+    w: int = Query(gt=0),
+    h: int = Query(gt=0),
+    db: Session = Depends(get_session),
+):
+    obj = db.get(SimulationRun, run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="snapshot not found")
+    try:
+        u = _load_field_for_run(obj)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="field not found")
+    H, W = u.shape
+    x1 = min(max(x0, 0), W)
+    y1 = min(max(y0, 0), H)
+    x2 = min(x1 + w, W)
+    y2 = min(y1 + h, H)
+    if x2 <= x1 or y2 <= y1:
+        raise HTTPException(status_code=400, detail="invalid roi")
+    roi = u[y1:y2, x1:x2]
+    k, ps = power_spectrum_radial(roi)
+    return {"x0": x1, "y0": y1, "w": int(x2 - x1), "h": int(y2 - y1), "k": k.tolist(), "ps": ps.tolist()}
+
+
 @app.get("/figures/{run_id}/autocorr")
 def get_autocorr(run_id: int, crop: int = Query(default=64, ge=8, le=512), db: Session = Depends(get_session)):
     obj = db.get(SimulationRun, run_id)
@@ -567,6 +596,34 @@ def get_autocorr(run_id: int, crop: int = Query(default=64, ge=8, le=512), db: S
     half = min(crop // 2, c0, c1)
     cut = ac[c0 - half : c0 + half, c1 - half : c1 + half]
     return {"crop": crop, "autocorr": cut.tolist()}
+
+
+@app.get("/figures/{run_id}/autocorr-roi")
+def get_autocorr_roi(
+    run_id: int,
+    x0: int = Query(ge=0),
+    y0: int = Query(ge=0),
+    w: int = Query(gt=0),
+    h: int = Query(gt=0),
+    db: Session = Depends(get_session),
+):
+    obj = db.get(SimulationRun, run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="snapshot not found")
+    try:
+        u = _load_field_for_run(obj)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="field not found")
+    H, W = u.shape
+    x1 = min(max(x0, 0), W)
+    y1 = min(max(y0, 0), H)
+    x2 = min(x1 + w, W)
+    y2 = min(y1 + h, H)
+    if x2 <= x1 or y2 <= y1:
+        raise HTTPException(status_code=400, detail="invalid roi")
+    roi = u[y1:y2, x1:x2]
+    ac = autocorr2d(roi, normalize=True)
+    return {"x0": x1, "y0": y1, "w": int(x2 - x1), "h": int(y2 - y1), "autocorr": ac.tolist()}
 
 
 @app.post("/runs/{run_id}/refresh")
@@ -748,7 +805,19 @@ def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)
     with open(out_path.as_posix(), "w", encoding="utf-8") as f:
         for v in s.tolist():
             f.write(f"{v}\n")
-    return {"path": out_path.as_posix()}
+    mr = ModelRun(
+        experiment_id=obj.experiment_id,
+        model_name=payload.method,
+        params_json=json.dumps({}),
+        status="finished",
+    )
+    db.add(mr)
+    db.commit()
+    db.refresh(mr)
+    art = Artifact(run_id=obj.id, kind="ai_scores", path=out_path.as_posix())
+    db.add(art)
+    db.commit()
+    return {"path": out_path.as_posix(), "model_run_id": mr.id, "artifact_path": art.path}
 
 
 class AiRunOnDatasetRequest(BaseModel):
@@ -787,6 +856,21 @@ def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_
     with open(out_path.as_posix(), "w", encoding="utf-8") as f:
         for v in s.tolist():
             f.write(f"{v}\n")
+    link = db.execute(select(ExperimentDataset).where(ExperimentDataset.dataset_id == ds.id)).scalars().first()
+    if link is not None:
+        mr = ModelRun(
+            experiment_id=link.experiment_id,
+            model_name=payload.method,
+            params_json=json.dumps({"dataset_id": ds.id}),
+            status="finished",
+        )
+        db.add(mr)
+        db.commit()
+        db.refresh(mr)
+        # Artifact only supports run_id; store path in model_run metrics_json
+        mr.metrics_json = json.dumps({"scores_path": out_path.as_posix()})
+        db.commit()
+        return {"path": out_path.as_posix(), "model_run_id": mr.id}
     return {"path": out_path.as_posix()}
 
 

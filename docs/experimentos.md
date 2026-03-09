@@ -100,6 +100,53 @@
 - Conclusiones:
   - Qué se observó, qué falta por validar, próximos experimentos
 
+## Ficha de Experimento (Ejemplo) – Run simulado
+- Identificación:
+  - Proyecto: “Exploración fuentes periódicas” / Experimento: “Periodic-01” / Fecha: 2026-03-09 / Autor: Equipo AETHERLAB
+- Hipótesis de trabajo:
+  - La fuente periódica genera patrones estables detectables en espectro radial y autocorrelación; la “memoria” sería observada como persistencia espacial-temporal.
+- Objetivo:
+  - Cuantificar estabilidad temporal y localizar pico espectral.
+- Parámetros de simulación:
+  - nx=128, ny=128, dt=0.02, steps=600, boundary=absorbing, source_kind=periodic_gaussian, amplitude=1.0, sigma=10, frequency=0.4, lam=0.0, diff=0.02, noise=0.0
+- Protocolo:
+  - POST /simulate/simple con `save_series=true` y `series_stride=10`.
+  - GET /figures/{run}/series para NPZ; GET /figures/{run}/spectrum y /autocorr con `crop` ajustado.
+- Métricas y figuras:
+  - Energía vs tiempo (PNG); Espectro radial (PNG, lineal/log); Autocorr 2D (PNG).
+- Resultados IA:
+  - POST /ai/run-on-run con `{"run_id": X, "method": "isoforest"}`; descargar CSV con GET /ai/download?path=...
+- Observaciones:
+  - Pico espectral estable; autocorrelación centrada con decaimiento radial; puntuaciones IA bajas (sin anomalías).
+- Limitaciones:
+  - Modelo numérico simplificado; sin validación externa.
+- Reproducibilidad:
+  - Seed 0 (fuente periódica determinista), versión commit, hardware local (CPU 8 hilos).
+
+## Ficha de Experimento (Ejemplo) – Dataset Planck
+- Identificación:
+  - Proyecto: “Comparativa mapas CMB” / Experimento: “Planck-Maps-ETL-01” / Fecha: 2026-03-09 / Autor: Equipo AETHERLAB
+- Hipótesis de trabajo:
+  - Los mapas CMB presentan texturas estadísticas que pueden compararse con simulaciones; la “memoria” se explora como persistencia de firmas en features.
+- Objetivo:
+  - Generar features reproduci­bles y evaluar detección de anomalías básica.
+- Datasets vinculados:
+  - `dataset_id=42`, name: “planck-local”, path: `C:\data\planck\map.npy` (archivo local predescargado).
+- Protocolo:
+  - POST /datasets con name/path; POST /experiments/{eid}/datasets/link?dataset_id=42.
+  - POST /ai/run-on-dataset `{"dataset_id": 42, "method": "mean_dist"}`; GET /ai/download?path=...
+  - Opcional: ejecutar ETL previo con módulo `aetherlab/packages/aether_data/etl.py` para features NPZ.
+- Métricas y figuras:
+  - Estadísticos de textura (energía/media/varianza) y distribución de scores.
+- Resultados IA:
+  - CSV de scores por bloque/patch; análisis simple de percentiles.
+- Observaciones:
+  - Puntuaciones distribuidas según esperados de textura estadística; sin afirmaciones ontológicas.
+- Limitaciones:
+  - Preprocesado local; falta de calibración cruzada con catálogos completos.
+- Reproducibilidad:
+  - Guardar hash/mtime del archivo en ETL; registrar commit y entorno.
+
 ## Protocolo de ejecución
 1) Crear experimento y configurar parámetros (UI o API).
 2) Activar `save_series=true` con `series_stride` adecuado.

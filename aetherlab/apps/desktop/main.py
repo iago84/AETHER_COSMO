@@ -60,6 +60,10 @@ class MainWindow(QMainWindow):
         btn_download_field = QPushButton("Descargar campo")
         btn_export_csv = QPushButton("Exportar métricas CSV")
         btn_export_html = QPushButton("Exportar reporte HTML")
+        btn_export_mp4 = QPushButton("Exportar MP4")
+        btn_roi_spec = QPushButton("Espectro ROI (API)")
+        btn_roi_ac = QPushButton("Autocorr ROI (API)")
+        btn_roi_csv = QPushButton("Export ROI CSV")
         btn_play = QPushButton("Reproducir serie")
         btn_stop = QPushButton("Parar")
         self.frame_idx = QSpinBox()
@@ -78,6 +82,10 @@ class MainWindow(QMainWindow):
         btn_download_field.clicked.connect(self.download_field)
         btn_export_csv.clicked.connect(self.export_series_metrics_csv)
         btn_export_html.clicked.connect(self.export_report_html)
+        btn_export_mp4.clicked.connect(self.export_mp4)
+        btn_roi_spec.clicked.connect(self.load_spectrum_roi_api)
+        btn_roi_ac.clicked.connect(self.load_autocorr_roi_api)
+        btn_roi_csv.clicked.connect(self.export_roi_csv)
         btn_play.clicked.connect(self.play_series)
         btn_stop.clicked.connect(self.stop_series)
         self.timer = QTimer(self)
@@ -123,6 +131,14 @@ class MainWindow(QMainWindow):
         self.crop.setRange(8, 512)
         self.crop.setValue(96)
         self.spec_log = QCheckBox("Espectro en log")
+        self.roi_x0 = QSpinBox()
+        self.roi_y0 = QSpinBox()
+        self.roi_w = QSpinBox()
+        self.roi_h = QSpinBox()
+        self.roi_x0.setRange(0, 2048)
+        self.roi_y0.setRange(0, 2048)
+        self.roi_w.setRange(1, 2048)
+        self.roi_h.setRange(1, 2048)
         layout = QVBoxLayout()
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Fuente"))
@@ -192,6 +208,16 @@ class MainWindow(QMainWindow):
         controls3.addWidget(btn_ac)
         controls3.addWidget(QLabel("crop"))
         controls3.addWidget(self.crop)
+        controls3.addWidget(QLabel("ROI x0"))
+        controls3.addWidget(self.roi_x0)
+        controls3.addWidget(QLabel("y0"))
+        controls3.addWidget(self.roi_y0)
+        controls3.addWidget(QLabel("w"))
+        controls3.addWidget(self.roi_w)
+        controls3.addWidget(QLabel("h"))
+        controls3.addWidget(self.roi_h)
+        controls3.addWidget(btn_roi_spec)
+        controls3.addWidget(btn_roi_ac)
         controls3.addWidget(QLabel("frame"))
         controls3.addWidget(self.frame_idx)
         controls3.addWidget(btn_play)
@@ -201,6 +227,8 @@ class MainWindow(QMainWindow):
         controls3.addWidget(btn_download_field)
         controls3.addWidget(btn_export_csv)
         controls3.addWidget(btn_export_html)
+        controls3.addWidget(btn_roi_csv)
+        controls3.addWidget(btn_export_mp4)
         layout.addLayout(controls2)
         layout.addLayout(controls3)
         layout.addWidget(self.tabs)
@@ -317,6 +345,117 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
 
+    def load_spectrum_roi_api(self):
+        try:
+            run_id = int(self.run_id.value())
+            base = "http://127.0.0.1:8000"
+            x0 = int(self.roi_x0.value())
+            y0 = int(self.roi_y0.value())
+            w = int(self.roi_w.value())
+            h = int(self.roi_h.value())
+            url = f"{base}/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            data = urllib.request.urlopen(url, timeout=10).read().decode()
+            o = json.loads(data)
+            k = np.array(o["k"])
+            ps = np.array(o["ps"])
+            self.fig2.clear()
+            ax = self.fig2.add_subplot(111)
+            if self.spec_log.isChecked():
+                ax.semilogy(k, ps, label="Espectro ROI")
+            else:
+                ax.plot(k, ps, label="Espectro ROI")
+            ax.set_xlabel("k")
+            ax.set_ylabel("potencia")
+            ax.grid(True)
+            ax.legend()
+            self.canvas2.draw_idle()
+        except urllib.error.URLError as e:
+            QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def load_autocorr_roi_api(self):
+        try:
+            run_id = int(self.run_id.value())
+            base = "http://127.0.0.1:8000"
+            x0 = int(self.roi_x0.value())
+            y0 = int(self.roi_y0.value())
+            w = int(self.roi_w.value())
+            h = int(self.roi_h.value())
+            url = f"{base}/figures/{run_id}/autocorr-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            data = urllib.request.urlopen(url, timeout=10).read().decode()
+            o = json.loads(data)
+            ac = np.array(o["autocorr"], dtype=np.float32)
+            self.fig3.clear()
+            ax = self.fig3.add_subplot(111)
+            im = ax.imshow(ac, cmap="viridis", origin="lower")
+            ax.set_title("Autocorrelación ROI")
+            self.fig3.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            self.canvas3.draw_idle()
+        except urllib.error.URLError as e:
+            QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def export_roi_csv(self):
+        try:
+            run_id = int(self.run_id.value())
+            base = "http://127.0.0.1:8000"
+            x0 = int(self.roi_x0.value())
+            y0 = int(self.roi_y0.value())
+            w = int(self.roi_w.value())
+            h = int(self.roi_h.value())
+            url = f"{base}/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            data = urllib.request.urlopen(url, timeout=10).read().decode()
+            o = json.loads(data)
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Guardar ROI espectro CSV",
+                f"roi_spec_{run_id}.csv",
+                "CSV (*.csv)",
+            )
+            if not path:
+                return
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                wcsv = csv.writer(f)
+                ks = o.get("k", [])
+                ps = o.get("ps", [])
+                wcsv.writerow(["k", "ps"])
+                for i in range(min(len(ks), len(ps))):
+                    wcsv.writerow([ks[i], ps[i]])
+            QMessageBox.information(self, "CSV", f"Guardado en {path}")
+        except urllib.error.URLError as e:
+            QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def export_mp4(self):
+        try:
+            if self.series_frames is None:
+                QMessageBox.information(self, "MP4", "Carga primero una serie NPZ")
+                return
+            path, _ = QFileDialog.getSaveFileName(self, "Guardar MP4", "series.mp4", "MP4 (*.mp4)")
+            if not path:
+                return
+            import matplotlib.animation as animation
+            fig = Figure(figsize=(5, 4), dpi=120)
+            ax = fig.add_subplot(111)
+            im = ax.imshow(self.series_frames[0], cmap="viridis", origin="lower")
+            ax.set_title("Serie de frames")
+            def update(i):
+                im.set_data(self.series_frames[i])
+                return [im]
+            ani = animation.FuncAnimation(fig, update, frames=int(self.series_frames.shape[0]), interval=100, blit=True)
+            try:
+                writer = animation.FFMpegWriter(fps=10)
+                buf = io.BytesIO()
+                fig.canvas.print_png(buf)
+                ani.save(path, writer=writer)
+                QMessageBox.information(self, "MP4", f"Guardado en {path}")
+            except Exception as e:
+                QMessageBox.warning(self, "MP4", f"No se pudo exportar MP4: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
     def refresh_run_state(self):
         try:
             run_id = int(self.run_id.value())

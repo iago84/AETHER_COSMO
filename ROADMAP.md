@@ -8,24 +8,25 @@
   - Baseline IA: IsolationForest, outlier-score rápido, DBSCAN + endpoints.
   - Ingesta de datos: registry y loaders Planck/GWOSC/SDSS, endpoints /data.
   - DB ampliada: datasets, model_runs y vínculos básicos.
+  - ETL reproducible raw/processed/features con caché y trazabilidad.
+  - Endpoints de ejecución IA sobre snapshots/datasets con guardado y descarga.
+  - Vinculación experimento↔dataset y listados.
   - CI con lint y tests básicos en Actions.
 - Parcial
   - Esquema DB extendido con figuras/artefactos/versions/tags/annotations.
   - Scripts/reportes HTML y flujos de export avanzados.
-  - UI: controles de serie con reproducción y frame actual.
-- Pendiente
-  - ETL reproducible raw/processed/features con caché y trazabilidad.
-  - Endpoints de ejecución IA sobre snapshots/datasets con guardado y descarga.
-  - Vinculación completa experimento↔dataset y comparativas.
   - UI: selección de ROI y exportación avanzada.
-  - Documentación técnica extendida y publicación.
+  - Documentación técnica extendida (manual, técnico, requisitos, experimentos) y publicación.
+- Pendiente
+  - Comparativas completas experimento↔dataset y reportes automatizados.
   - Docker Compose y CI/CD de despliegue.
 
 ## Siguientes Pasos
-- Implementar ETL reproducible en aether-data con estructura raw/processed/features y caché local.
-- Añadir endpoints para vincular datasets a experimentos y ejecutar modelos IA sobre snapshots/datasets con guardado (CSV/JSON) y descarga.
-- Extender UI PyQt6 para animaciones, selección de ROI y export avanzada.
-- Mantener este checklist y enlazar módulos/endpoints clave.
+- Completar UI: ROI interactivo y export de métricas/MP4.
+- Trazabilidad: registrar artifacts/outputs de ETL/IA en DB (ModelRun + Artifact).
+- Reportes: plantilla HTML/Markdown automatizada con enlaces a artefactos.
+- Publicación: documentación hospedada (MkDocs/Sphinx) y guía de experimentos.
+- Despliegue: Docker Compose y CI/CD.
 
 ## Enlaces Clave
 - API: aetherlab/apps/api/main.py
