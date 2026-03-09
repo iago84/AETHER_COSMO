@@ -12,6 +12,8 @@ from starlette.responses import FileResponse
 
 from aetherlab.packages.aether_core.db import ENGINE, SessionLocal, ensure_schema
 from aetherlab.packages.aether_core.models_db import Base, Experiment, Project, SimulationRun
+from aetherlab.packages.aether_data.registry import get as get_dataset, list_datasets
+from aetherlab.packages.aether_ai.baseline import dbscan_labels, isolation_forest_score, pca_outlier_score
 from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, power_spectrum_radial
 from aetherlab.packages.aether_sim.simulator2d import Simulator2D
 from aetherlab.packages.aether_sim.sources import (
@@ -573,3 +575,59 @@ def refresh_run(run_id: int, db: Session = Depends(get_session)):
             return {"run_id": run_id, "status": obj.status}
     # Fallback: keep queued/running
     return {"run_id": run_id, "status": obj.status or "queued"}
+
+
+class DataLoadRequest(BaseModel):
+    name: str
+    path: str
+
+
+@app.get("/data/datasets")
+def data_list():
+    return {"datasets": list_datasets()}
+
+
+@app.post("/data/load")
+def data_load(payload: DataLoadRequest):
+    try:
+        entry = get_dataset(payload.name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="dataset not registered")
+    loader = entry["loader"]
+    try:
+        info = loader(payload.path)
+        return {"name": payload.name, "info": info}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class OutlierScoreRequest(BaseModel):
+    method: str = "isoforest"  # isoforest | mean_dist
+    X: list[list[float]]
+    random_state: int | None = 0
+
+
+@app.post("/ai/outlier-score")
+def ai_outlier_score(payload: OutlierScoreRequest):
+    X = np.asarray(payload.X, dtype=np.float32)
+    if payload.method == "isoforest":
+        s = isolation_forest_score(X, random_state=payload.random_state or 0)
+    elif payload.method == "mean_dist":
+        s = pca_outlier_score(X)
+    else:
+        raise HTTPException(status_code=400, detail="unknown method")
+    return {"scores": s.tolist()}
+
+
+class DbscanRequest(BaseModel):
+    X: list[list[float]]
+    eps: float = 0.5
+    min_samples: int = 5
+    metric: str = "euclidean"
+
+
+@app.post("/ai/dbscan")
+def ai_dbscan(payload: DbscanRequest):
+    X = np.asarray(payload.X, dtype=np.float32)
+    labels = dbscan_labels(X, eps=payload.eps, min_samples=payload.min_samples, metric=payload.metric)  # type: ignore[arg-type]
+    return {"labels": labels.tolist()}
