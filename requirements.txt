@@ -8,3 +8,6 @@ PyQt6
 redis
 rq
 psycopg2-binary
+scikit-learn
+pandas
+h5py

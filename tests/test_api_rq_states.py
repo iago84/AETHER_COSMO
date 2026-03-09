@@ -1,8 +1,10 @@
 import sys
 import types
 
+import os, time
 from fastapi.testclient import TestClient
 
+os.environ["AETHERLAB_DB_URL"] = "sqlite+pysqlite:///:memory:"
 from aetherlab.apps.api.main import app
 
 
@@ -51,9 +53,10 @@ class FakeQueue:
 
 
 def _bootstrap(client: TestClient):
-    rp = client.post("/projects", json={"name": "Proyecto RQ States", "description": "Test"})
+    uniq = int(time.time() * 1000)
+    rp = client.post("/projects", json={"name": f"Proyecto RQ States {uniq}", "description": "Test"})
     pid = rp.json()["id"]
-    re = client.post("/experiments", json={"project_id": pid, "name": "Exp RQ States"})
+    re = client.post("/experiments", json={"project_id": pid, "name": f"Exp RQ States {uniq}"})
     return re.json()["id"]
 
 
@@ -70,43 +73,43 @@ def _setup_rq(monkeypatch, state):
 
 def test_get_run_status_queued(monkeypatch):
     _setup_rq(monkeypatch, "queued")
-    client = TestClient(app)
-    eid = _bootstrap(client)
-    rs = client.post("/simulate/async", json={"experiment_id": eid})
-    run_id = rs.json()["run_id"]
-    r = client.get(f"/runs/{run_id}")
-    assert r.status_code == 200
-    assert r.json()["status"] in ("queued", "finished")
+    with TestClient(app) as client:
+        eid = _bootstrap(client)
+        rs = client.post("/simulate/async", json={"experiment_id": eid})
+        run_id = rs.json()["run_id"]
+        r = client.get(f"/runs/{run_id}")
+        assert r.status_code == 200
+        assert r.json()["status"] in ("queued", "finished")
 
 
 def test_get_run_status_running(monkeypatch):
     _setup_rq(monkeypatch, "running")
-    client = TestClient(app)
-    eid = _bootstrap(client)
-    rs = client.post("/simulate/async", json={"experiment_id": eid})
-    run_id = rs.json()["run_id"]
-    r = client.get(f"/runs/{run_id}")
-    assert r.status_code == 200
-    assert r.json()["status"] in ("running", "finished")
+    with TestClient(app) as client:
+        eid = _bootstrap(client)
+        rs = client.post("/simulate/async", json={"experiment_id": eid})
+        run_id = rs.json()["run_id"]
+        r = client.get(f"/runs/{run_id}")
+        assert r.status_code == 200
+        assert r.json()["status"] in ("running", "finished")
 
 
 def test_get_run_status_failed(monkeypatch):
     _setup_rq(monkeypatch, "failed")
-    client = TestClient(app)
-    eid = _bootstrap(client)
-    rs = client.post("/simulate/async", json={"experiment_id": eid})
-    run_id = rs.json()["run_id"]
-    r = client.get(f"/runs/{run_id}")
-    assert r.status_code == 200
-    assert r.json()["status"] in ("failed", "finished")
+    with TestClient(app) as client:
+        eid = _bootstrap(client)
+        rs = client.post("/simulate/async", json={"experiment_id": eid})
+        run_id = rs.json()["run_id"]
+        r = client.get(f"/runs/{run_id}")
+        assert r.status_code == 200
+        assert r.json()["status"] in ("failed", "finished")
 
 
 def test_get_run_status_finished(monkeypatch):
     _setup_rq(monkeypatch, "finished")
-    client = TestClient(app)
-    eid = _bootstrap(client)
-    rs = client.post("/simulate/async", json={"experiment_id": eid})
-    run_id = rs.json()["run_id"]
-    r = client.get(f"/runs/{run_id}")
-    assert r.status_code == 200
-    assert r.json()["status"] == "finished"
+    with TestClient(app) as client:
+        eid = _bootstrap(client)
+        rs = client.post("/simulate/async", json={"experiment_id": eid})
+        run_id = rs.json()["run_id"]
+        r = client.get(f"/runs/{run_id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "finished"

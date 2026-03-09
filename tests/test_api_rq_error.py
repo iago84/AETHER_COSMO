@@ -1,8 +1,10 @@
 import sys
 import types
 
+import os, time
 from fastapi.testclient import TestClient
 
+os.environ["AETHERLAB_DB_URL"] = "sqlite+pysqlite:///:memory:"
 from aetherlab.apps.api.main import app
 
 
@@ -44,17 +46,18 @@ def test_retry_abort_errors(monkeypatch):
     monkeypatch.setitem(sys.modules, "rq.job", fake_rq_job_module)
     monkeypatch.setenv("REDIS_URL", "redis://fake/0")
 
-    client = TestClient(app)
-    rp = client.post("/projects", json={"name": "Proyecto Err", "description": "Test"})
-    pid = rp.json()["id"]
-    re = client.post("/experiments", json={"project_id": pid, "name": "Exp Err"})
-    eid = re.json()["id"]
+    with TestClient(app) as client:
+        uniq = int(time.time() * 1000)
+        rp = client.post("/projects", json={"name": f"Proyecto Err {uniq}", "description": "Test"})
+        pid = rp.json()["id"]
+        re = client.post("/experiments", json={"project_id": pid, "name": f"Exp Err {uniq}"})
+        eid = re.json()["id"]
 
-    rs = client.post("/simulate/async", json={"experiment_id": eid})
-    run_id = rs.json()["run_id"]
+        rs = client.post("/simulate/async", json={"experiment_id": eid})
+        run_id = rs.json()["run_id"]
 
-    rretry = client.post(f"/runs/{run_id}/retry")
-    assert rretry.status_code in (200, 500, 400)
+        rretry = client.post(f"/runs/{run_id}/retry")
+        assert rretry.status_code in (200, 500, 400)
 
-    rabort = client.post(f"/runs/{run_id}/abort")
-    assert rabort.status_code in (200, 500, 400)
+        rabort = client.post(f"/runs/{run_id}/abort")
+        assert rabort.status_code in (200, 500, 400)

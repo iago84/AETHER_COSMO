@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 def default_sqlite_url(root: str | None = None) -> str:
@@ -15,6 +16,11 @@ def default_sqlite_url(root: str | None = None) -> str:
 
 def make_engine():
     url = os.environ.get("AETHERLAB_DB_URL") or default_sqlite_url()
+    if url.startswith("sqlite"):
+        connect_args = {"check_same_thread": False}
+        if ":memory:" in url:
+            return create_engine(url, future=True, connect_args=connect_args, poolclass=StaticPool)
+        return create_engine(url, future=True, connect_args=connect_args)
     return create_engine(url, future=True)
 
 
