@@ -11,8 +11,17 @@ from sqlalchemy.orm import Session
 from starlette.responses import FileResponse
 
 from aetherlab.packages.aether_core.db import ENGINE, SessionLocal, ensure_schema
-from aetherlab.packages.aether_core.models_db import Base, Dataset, Experiment, ModelRun, Project, SimulationRun
+from aetherlab.packages.aether_core.models_db import (
+    Base,
+    Dataset,
+    Experiment,
+    ExperimentDataset,
+    ModelRun,
+    Project,
+    SimulationRun,
+)
 from aetherlab.packages.aether_data.registry import get as get_dataset, list_datasets
+from aetherlab.packages.aether_data.etl import ensure_tree, process_map_to_features, process_strain_to_features
 from aetherlab.packages.aether_ai.baseline import dbscan_labels, isolation_forest_score, pca_outlier_score
 from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, power_spectrum_radial
 from aetherlab.packages.aether_sim.simulator2d import Simulator2D
@@ -689,3 +698,103 @@ def list_model_runs(experiment_id: int | None = None, db: Session = Depends(get_
         }
         for m in rows
     ]
+
+
+@app.post("/experiments/{experiment_id}/datasets/link")
+def link_dataset(experiment_id: int, dataset_id: int, db: Session = Depends(get_session)):
+    exp = db.get(Experiment, experiment_id)
+    ds = db.get(Dataset, dataset_id)
+    if exp is None or ds is None:
+        raise HTTPException(status_code=404, detail="experiment or dataset not found")
+    link = ExperimentDataset(experiment_id=experiment_id, dataset_id=dataset_id)
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return {"id": link.id, "experiment_id": experiment_id, "dataset_id": dataset_id}
+
+
+@app.get("/experiments/{experiment_id}/datasets")
+def list_experiment_datasets(experiment_id: int, db: Session = Depends(get_session)):
+    rows = db.execute(select(ExperimentDataset).where(ExperimentDataset.experiment_id == experiment_id)).scalars().all()
+    return [{"id": r.id, "experiment_id": r.experiment_id, "dataset_id": r.dataset_id} for r in rows]
+
+
+class AiRunOnRunRequest(BaseModel):
+    run_id: int
+    method: str = "isoforest"
+
+
+@app.post("/ai/run-on-run")
+def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)):
+    obj = db.get(SimulationRun, payload.run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    try:
+        u = _load_field_for_run(obj)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="field not found")
+    X = u.reshape(-1, 1)
+    if payload.method == "isoforest":
+        s = isolation_forest_score(X)
+    elif payload.method == "mean_dist":
+        s = pca_outlier_score(X)
+    else:
+        raise HTTPException(status_code=400, detail="unknown method")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time())
+    out_path = out_dir / f"ai_run_{obj.id}_{stamp}.csv"
+    with open(out_path.as_posix(), "w", encoding="utf-8") as f:
+        for v in s.tolist():
+            f.write(f"{v}\n")
+    return {"path": out_path.as_posix()}
+
+
+class AiRunOnDatasetRequest(BaseModel):
+    dataset_id: int
+    method: str = "isoforest"
+
+
+@app.post("/ai/run-on-dataset")
+def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_session)):
+    ds = db.get(Dataset, payload.dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    p = Path(ds.path)
+    root = Path(__file__).resolve().parents[3]
+    try:
+        # Attempt ETL to features
+        if p.suffix in (".npy", ".npz"):
+            features = process_map_to_features(p, root)
+            z = np.load(features.as_posix())
+            X = z["features"].reshape(-1, 1)
+        else:
+            features = process_strain_to_features(p, root)
+            z = np.load(features.as_posix())
+            X = z["features"].reshape(-1, 1)
+    except Exception:
+        raise HTTPException(status_code=500, detail="etl failed")
+    if payload.method == "isoforest":
+        s = isolation_forest_score(X)
+    elif payload.method == "mean_dist":
+        s = pca_outlier_score(X)
+    else:
+        raise HTTPException(status_code=400, detail="unknown method")
+    out_dir = ensure_tree(root)["features"]
+    stamp = int(time.time())
+    out_path = out_dir / f"ai_ds_{ds.id}_{stamp}.csv"
+    with open(out_path.as_posix(), "w", encoding="utf-8") as f:
+        for v in s.tolist():
+            f.write(f"{v}\n")
+    return {"path": out_path.as_posix()}
+
+
+@app.get("/ai/download")
+def ai_download(path: str):
+    p = Path(path)
+    root = Path(__file__).resolve().parents[3]
+    base = root / "aetherlab" / "data"
+    if not p.exists() or not p.as_posix().startswith(base.as_posix()):
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(p)

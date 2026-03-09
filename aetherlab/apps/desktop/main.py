@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -59,6 +60,11 @@ class MainWindow(QMainWindow):
         btn_download_field = QPushButton("Descargar campo")
         btn_export_csv = QPushButton("Exportar métricas CSV")
         btn_export_html = QPushButton("Exportar reporte HTML")
+        btn_play = QPushButton("Reproducir serie")
+        btn_stop = QPushButton("Parar")
+        self.frame_idx = QSpinBox()
+        self.frame_idx.setRange(0, 100000)
+        self.frame_idx.setValue(0)
         btn_load.clicked.connect(self.load_last)
         btn_sim.clicked.connect(self.simulate_demo)
         btn_series.clicked.connect(self.load_series_plot)
@@ -72,6 +78,12 @@ class MainWindow(QMainWindow):
         btn_download_field.clicked.connect(self.download_field)
         btn_export_csv.clicked.connect(self.export_series_metrics_csv)
         btn_export_html.clicked.connect(self.export_report_html)
+        btn_play.clicked.connect(self.play_series)
+        btn_stop.clicked.connect(self.stop_series)
+        self.timer = QTimer(self)
+        self.timer.setInterval(200)
+        self.timer.timeout.connect(self.advance_frame)
+        self.series_frames = None
         self.run_id = QSpinBox()
         self.run_id.setRange(1, 1000000)
         self.run_id.setValue(1)
@@ -180,6 +192,10 @@ class MainWindow(QMainWindow):
         controls3.addWidget(btn_ac)
         controls3.addWidget(QLabel("crop"))
         controls3.addWidget(self.crop)
+        controls3.addWidget(QLabel("frame"))
+        controls3.addWidget(self.frame_idx)
+        controls3.addWidget(btn_play)
+        controls3.addWidget(btn_stop)
         controls3.addWidget(btn_download)
         controls3.addWidget(btn_download_series)
         controls3.addWidget(btn_download_field)
@@ -241,10 +257,15 @@ class MainWindow(QMainWindow):
             bio = io.BytesIO(resp)
             z = np.load(bio)
             frames = z["frames"]
+            self.series_frames = frames
+            self.frame_idx.setRange(0, int(frames.shape[0]) - 1)
+            idx = int(self.frame_idx.value())
+            idx = max(0, min(idx, int(frames.shape[0]) - 1))
             energy = np.mean(frames**2, axis=(1, 2))
             self.fig.clear()
             ax = self.fig.add_subplot(111)
             ax.plot(np.arange(len(energy)), energy, label="Energía")
+            ax.axvline(idx, color="red", linestyle="--", label="frame actual")
             ax.set_xlabel("frame")
             ax.set_ylabel("energía")
             ax.grid(True)
@@ -487,6 +508,34 @@ img{{max-width:100%}}
             QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
+
+    def play_series(self):
+        if self.series_frames is None:
+            QMessageBox.information(self, "Serie", "Carga primero una serie NPZ")
+            return
+        self.timer.start()
+
+    def stop_series(self):
+        self.timer.stop()
+
+    def advance_frame(self):
+        if self.series_frames is None:
+            self.timer.stop()
+            return
+        idx = int(self.frame_idx.value()) + 1
+        if idx >= int(self.series_frames.shape[0]):
+            idx = 0
+        self.frame_idx.setValue(idx)
+        energy = np.mean(self.series_frames**2, axis=(1, 2))
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+        ax.plot(np.arange(len(energy)), energy, label="Energía")
+        ax.axvline(idx, color="red", linestyle="--", label="frame actual")
+        ax.set_xlabel("frame")
+        ax.set_ylabel("energía")
+        ax.grid(True)
+        ax.legend()
+        self.canvas.draw_idle()
 
 
 def main():

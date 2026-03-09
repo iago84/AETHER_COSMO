@@ -24,6 +24,10 @@ class Experiment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     project: Mapped["Project"] = relationship(back_populates="experiments")
     runs: Mapped[list["SimulationRun"]] = relationship(back_populates="experiment", cascade="all, delete-orphan")
+    datasets: Mapped[list["ExperimentDataset"]] = relationship(
+        back_populates="experiment",
+        cascade="all, delete-orphan",
+    )
 
 
 class SimulationRun(Base):
@@ -103,3 +107,12 @@ class ExperimentVersion(Base):
     params_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     experiment: Mapped["Experiment"] = relationship()
+
+
+class ExperimentDataset(Base):
+    __tablename__ = "experiment_datasets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    experiment: Mapped["Experiment"] = relationship(back_populates="datasets")
