@@ -35,3 +35,71 @@ class SimulationRun(Base):
     snapshot_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     experiment: Mapped["Experiment"] = relationship(back_populates="runs")
+
+
+class Dataset(Base):
+    __tablename__ = "datasets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ModelRun(Base):
+    __tablename__ = "model_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    params_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="created")
+    metrics_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    experiment: Mapped["Experiment"] = relationship()
+
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("simulation_runs.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(100), nullable=False)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    run: Mapped["SimulationRun"] = relationship()
+
+
+class Figure(Base):
+    __tablename__ = "figures"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("simulation_runs.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(100), nullable=False)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    run: Mapped["SimulationRun"] = relationship()
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    experiment: Mapped["Experiment"] = relationship()
+
+
+class Annotation(Base):
+    __tablename__ = "annotations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("simulation_runs.id"), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    run: Mapped["SimulationRun"] = relationship()
+
+
+class ExperimentVersion(Base):
+    __tablename__ = "experiment_versions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    experiment_id: Mapped[int] = mapped_column(ForeignKey("experiments.id"), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    experiment: Mapped["Experiment"] = relationship()

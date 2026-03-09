@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from starlette.responses import FileResponse
 
 from aetherlab.packages.aether_core.db import ENGINE, SessionLocal, ensure_schema
-from aetherlab.packages.aether_core.models_db import Base, Experiment, Project, SimulationRun
+from aetherlab.packages.aether_core.models_db import Base, Dataset, Experiment, ModelRun, Project, SimulationRun
 from aetherlab.packages.aether_data.registry import get as get_dataset, list_datasets
 from aetherlab.packages.aether_ai.baseline import dbscan_labels, isolation_forest_score, pca_outlier_score
 from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, power_spectrum_radial
@@ -631,3 +631,61 @@ def ai_dbscan(payload: DbscanRequest):
     X = np.asarray(payload.X, dtype=np.float32)
     labels = dbscan_labels(X, eps=payload.eps, min_samples=payload.min_samples, metric=payload.metric)  # type: ignore[arg-type]
     return {"labels": labels.tolist()}
+
+
+class DatasetIn(BaseModel):
+    name: str
+    path: str
+    description: str | None = None
+
+
+@app.post("/datasets")
+def create_dataset(payload: DatasetIn, db: Session = Depends(get_session)):
+    obj = Dataset(name=payload.name, path=payload.path, description=payload.description)
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return {"id": obj.id, "name": obj.name, "path": obj.path}
+
+
+@app.get("/datasets")
+def list_datasets_db(db: Session = Depends(get_session)):
+    rows = db.execute(select(Dataset)).scalars().all()
+    return [{"id": d.id, "name": d.name, "path": d.path, "description": d.description} for d in rows]
+
+
+class ModelRunIn(BaseModel):
+    experiment_id: int
+    model_name: str
+    params: dict | None = None
+
+
+@app.post("/models")
+def create_model_run(payload: ModelRunIn, db: Session = Depends(get_session)):
+    obj = ModelRun(
+        experiment_id=payload.experiment_id,
+        model_name=payload.model_name,
+        params_json=json.dumps(payload.params or {}),
+        status="created",
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return {"id": obj.id, "model_name": obj.model_name, "experiment_id": obj.experiment_id}
+
+
+@app.get("/models")
+def list_model_runs(experiment_id: int | None = None, db: Session = Depends(get_session)):
+    stmt = select(ModelRun).order_by(ModelRun.id.desc())
+    if experiment_id is not None:
+        stmt = stmt.where(ModelRun.experiment_id == experiment_id)
+    rows = db.execute(stmt).scalars().all()
+    return [
+        {
+            "id": m.id,
+            "experiment_id": m.experiment_id,
+            "model_name": m.model_name,
+            "status": m.status,
+        }
+        for m in rows
+    ]
