@@ -72,6 +72,7 @@ python aetherlab\apps\desktop\main.py
 - Guardar serie y stride.
 - run_id y estado con botones: Actualizar, Abortar, Reintentar (si RQ).
 - Descargas: snapshot (PNG), serie (NPZ), campo (NPY), export de métricas CSV.
+ - Reproducción de series: botones “Reproducir/Parar” y control de frame actual.
 
 ### Visualización
 - Energía vs tiempo (desde serie NPZ).
@@ -86,8 +87,30 @@ python aetherlab\apps\desktop\main.py
 5) Pulsa “Autocorr (API)” y ajusta “crop” para inspección local.  
 6) Descarga artefactos o exporta CSV para análisis externo.
 
+## Datos y IA
+
+### Registrar datasets en DB
+- Crear un dataset:
+  - `POST /datasets` con `{"name": "...", "path": "ruta_local", "description": "opcional"}`
+- Listar datasets:
+  - `GET /datasets`
+
+### Vincular dataset a experimento
+- `POST /experiments/{experiment_id}/datasets/link?dataset_id={id}`
+- Listar vínculos del experimento:
+  - `GET /experiments/{experiment_id}/datasets`
+
+### Ejecutar IA
+- Sobre un run:
+  - `POST /ai/run-on-run` con `{"run_id": X, "method": "isoforest|mean_dist"}`
+  - Descarga de resultados CSV:
+    - `GET /ai/download?path=...` (ruta devuelta por el endpoint)
+- Sobre un dataset:
+  - `POST /ai/run-on-dataset` con `{"dataset_id": X, "method": "isoforest|mean_dist"}`
+  - Descarga de resultados CSV:
+    - `GET /ai/download?path=...`
+
 ## Consejos
 - Si el espectro muestra alta energía en alta k, reduce `dt` o aumenta `diff`.
 - Con `boundary=absorbing` minimizarás reflexiones; útil para fuentes pulsadas.
 - `save_series` genera NPZ; evita strides muy pequeños en simulaciones largas.
-

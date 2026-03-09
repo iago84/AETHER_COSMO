@@ -4,7 +4,7 @@
 
 ### Software
 - Python 3.11+
-- Dependencias: `fastapi`, `uvicorn`, `SQLAlchemy`, `numpy`, `matplotlib`, `PyQt6`
+- Dependencias: `fastapi`, `uvicorn`, `SQLAlchemy`, `numpy`, `matplotlib`, `PyQt6`, `scikit-learn`, `pandas`, `h5py`
 - Opcionales (asíncrono): `redis`, `rq`
 - DB: SQLite (por defecto) o PostgreSQL (producción)
 
@@ -12,11 +12,11 @@
 - Desarrollo/uso local:
   - CPU: 4 núcleos
   - RAM: 8–16 GB
-  - Disco: 1–5 GB libres para outputs (PNG/NPY/NPZ)
+  - Disco: 5–20 GB libres para outputs y features (PNG/NPY/NPZ/CSV)
 - Servidor API ligero:
   - CPU: 2–4 vCPU
   - RAM: 4–8 GB
-  - Almacenamiento: 10–50 GB (según retención de series)
+  - Almacenamiento: 20–100 GB (según retención de series y cache ETL)
 - Opcional AI (entrenamiento):
   - GPU CUDA (8–16 GB VRAM) si se agregan modelos DL
 
@@ -24,12 +24,13 @@
 - API con Uvicorn/Gunicorn detrás de Nginx o equivalente.
 - Redis gestionado (Docker o servicio administrado).
 - DB PostgreSQL gestionada si se requiere multiusuario/escala.
-- Logs y rotación para outputs en `aetherlab/data/outputs/`.
+- Logs y rotación para outputs en `aetherlab/data/outputs/` y features en `aetherlab/data/features/`.
 
 ### Seguridad
 - Variables de entorno para credenciales (nunca en el repo).
 - TLS/HTTPS al exponer la API públicamente.
 - Políticas de retención y limpieza de artefactos.
+ - Cumplimiento de privacidad en datasets reales (GDPR/CCPA) cuando aplique.
 
 ## Requisitos Económicos (estimaciones)
 
@@ -41,7 +42,7 @@
 - VM pequeña (2 vCPU, 4–8 GB RAM): 20–60 €
 - Redis gestionado básico: 10–30 €
 - PostgreSQL gestionado básico: 20–50 €
-- Almacenamiento (50–200 GB): 2–10 €
+- Almacenamiento (50–300 GB): 3–12 €
 - Total orientativo: 50–150 € según proveedor y región.
 
 ### Escalado
@@ -58,4 +59,4 @@
 - Empezar con SQLite + BackgroundTasks para MVP.
 - Migrar a Redis/RQ y PostgreSQL al escalar usuarios o barridos.
 - Automatizar backups de DB y outputs críticos.
-
+ - Versionar modelos y artefactos (ModelRun + Artifact) para trazabilidad.
