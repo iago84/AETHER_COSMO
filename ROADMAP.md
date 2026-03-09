@@ -34,3 +34,15 @@
 - IA baseline: aetherlab/packages/aether_ai/baseline.py
 - Datos: aetherlab/packages/aether_data/registry.py, aetherlab/packages/aether_data/etl.py
 - UI: aetherlab/apps/desktop/main.py
+
+## Plan nocturno (tareas propuestas)
+- Implementar ROI interactivo con ratón sobre snapshot y pestañas (drag/resize).
+- Ampliar Artifact para admitir `dataset_id` opcional y registrar ETL/IA de datos.
+- Añadir endpoints de reporte: `GET /reports/run/{id}/html` y `GET /reports/experiment/{id}/html`.
+- Script de limpieza por antigüedad en `aetherlab/data/{outputs,features}` con umbral configurable.
+- Extender ETL: soporte `parquet/csv` y normalizaciones (z-score/min-max).
+- IA: incorporar HDBSCAN y endpoint PCA-plot para visualización rápida.
+- Exportar MP4 vía API: `GET /figures/{run}/series.mp4` con codificación server-side.
+- Tests: cubrir endpoints ROI, registro ModelRun/Artifact y descarga segura.
+- Docs: guía de reproducibilidad (seeds/versiones/entorno) y plantilla automatizada.
+- DevOps: Docker Compose (API+Redis+Postgres) y CI/CD básico de despliegue.

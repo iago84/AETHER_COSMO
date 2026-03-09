@@ -2,6 +2,7 @@ import hashlib
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 
 def ensure_tree(root: Path) -> dict:
@@ -50,6 +51,14 @@ def _load_array(path: Path) -> np.ndarray:
         z = np.load(path.as_posix())
         key = z.files[0]
         return z[key]
+    if path.suffix == ".csv":
+        df = pd.read_csv(path.as_posix())
+        num = df.select_dtypes(include=["number"])
+        return num.to_numpy()
+    if path.suffix == ".parquet":
+        df = pd.read_parquet(path.as_posix())
+        num = df.select_dtypes(include=["number"])
+        return num.to_numpy()
     try:
         import h5py
 

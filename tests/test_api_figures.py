@@ -63,6 +63,16 @@ def test_figures_and_runs_endpoints():
         assert rspec.status_code == 200
         data = rspec.json()
         assert "k" in data and "ps" in data
+
+    # ROI endpoints
+        rsroi = client.get(f"/figures/{run_id}/spectrum-roi", params={"x0": 0, "y0": 0, "w": 8, "h": 8})
+        assert rsroi.status_code == 200
+        adata = rsroi.json()
+        assert "k" in adata and "ps" in adata
+        racroi = client.get(f"/figures/{run_id}/autocorr-roi", params={"x0": 0, "y0": 0, "w": 8, "h": 8})
+        assert racroi.status_code == 200
+        acdata = racroi.json()
+        assert "autocorr" in acdata
         rac = client.get(f"/figures/{run_id}/autocorr", params={"crop": 16})
         assert rac.status_code == 200
         ac = rac.json()["autocorr"]

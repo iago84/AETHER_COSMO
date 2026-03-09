@@ -1,10 +1,12 @@
 import json
+import base64
+import io
 import os
 import time
 from pathlib import Path
 
 import numpy as np
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -867,10 +869,10 @@ def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_
         db.add(mr)
         db.commit()
         db.refresh(mr)
-        # Artifact only supports run_id; store path in model_run metrics_json
-        mr.metrics_json = json.dumps({"scores_path": out_path.as_posix()})
+        art = Artifact(run_id=None, dataset_id=ds.id, kind="ai_scores", path=out_path.as_posix())
+        db.add(art)
         db.commit()
-        return {"path": out_path.as_posix(), "model_run_id": mr.id}
+        return {"path": out_path.as_posix(), "model_run_id": mr.id, "artifact_path": art.path}
     return {"path": out_path.as_posix()}
 
 
@@ -882,3 +884,78 @@ def ai_download(path: str):
     if not p.exists() or not p.as_posix().startswith(base.as_posix()):
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(p)
+
+
+@app.get("/reports/run/{run_id}/html")
+def report_run_html(run_id: int, crop: int = Query(default=64, ge=8, le=512), db: Session = Depends(get_session)):
+    obj = db.get(SimulationRun, run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    snap = Path(obj.snapshot_path)
+    if not snap.exists():
+        raise HTTPException(status_code=404, detail="snapshot not found")
+    snap_b = snap.read_bytes()
+    try:
+        u = _load_field_for_run(obj)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="field not found")
+    k, ps = power_spectrum_radial(u)
+    ac = autocorr2d(u, normalize=True)
+    h, w = ac.shape
+    c0 = h // 2
+    c1 = w // 2
+    half = min(crop // 2, c0, c1)
+    cut = ac[c0 - half : c0 + half, c1 - half : c1 + half]
+    import matplotlib.pyplot as plt  # noqa: WPS433
+    figS = plt.Figure(figsize=(5, 3), dpi=120)
+    axS = figS.add_subplot(111)
+    axS.plot(k, ps, label="Espectro radial")
+    axS.set_xlabel("k")
+    axS.set_ylabel("potencia")
+    axS.grid(True)
+    axS.legend()
+    bufS = io.BytesIO()
+    figS.savefig(bufS, format="png", bbox_inches="tight")
+    figA = plt.Figure(figsize=(4, 4), dpi=120)
+    axA = figA.add_subplot(111)
+    im = axA.imshow(cut, cmap="viridis", origin="lower")
+    figA.colorbar(im, ax=axA, fraction=0.046, pad=0.04)
+    bufA = io.BytesIO()
+    figA.savefig(bufA, format="png", bbox_inches="tight")
+    snap_b64 = "data:image/png;base64," + base64.b64encode(snap_b).decode()
+    spec_b64 = "data:image/png;base64," + base64.b64encode(bufS.getvalue()).decode()
+    auto_b64 = "data:image/png;base64," + base64.b64encode(bufA.getvalue()).decode()
+    html = (
+        "<!doctype html><html lang='es'><head><meta charset='utf-8'>"
+        f"<title>Reporte Run {run_id}</title>"
+        "<style>body{font-family:Arial;margin:20px}.grid{display:grid;"
+        "grid-template-columns:repeat(2,1fr);gap:20px}.card{border:1px solid #ccc;"
+        "padding:12px;border-radius:8px}img{max-width:100%}</style></head><body>"
+        f"<h1>Reporte de Run {run_id}</h1><div class='grid'>"
+        f"<div class='card'><h2>Snapshot</h2><img src='{snap_b64}'/></div>"
+        f"<div class='card'><h2>Espectro radial</h2><img src='{spec_b64}'/></div>"
+        f"<div class='card'><h2>Autocorrelación 2D</h2><img src='{auto_b64}'/></div>"
+        "</div></body></html>"
+    )
+    return Response(content=html, media_type="text/html")
+
+
+@app.post("/data/cleanup")
+def data_cleanup(days: int = 30):
+    root = Path(__file__).resolve().parents[3]
+    base = root / "aetherlab" / "data"
+    targets = [base / "outputs", base / "features"]
+    now = time.time()
+    removed = []
+    for t in targets:
+        if not t.exists():
+            continue
+        for p in t.glob("*"):
+            try:
+                age = now - p.stat().st_mtime
+                if age > days * 86400:
+                    p.unlink()
+                    removed.append(p.as_posix())
+            except Exception:
+                continue
+    return {"removed": removed, "days": days}
