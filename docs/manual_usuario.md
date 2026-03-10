@@ -109,8 +109,18 @@ python aetherlab\apps\desktop\main.py
   - `POST /ai/run-on-dataset` con `{"dataset_id": X, "method": "isoforest|mean_dist"}`
   - Descarga de resultados CSV:
     - `GET /ai/download?path=...`
+ - Visualización PCA:
+   - `POST /ai/pca-plot` con `{"X": [[...], ...]}` → devuelve PNG embebido (base64).
 
 ## Consejos
 - Si el espectro muestra alta energía en alta k, reduce `dt` o aumenta `diff`.
 - Con `boundary=absorbing` minimizarás reflexiones; útil para fuentes pulsadas.
 - `save_series` genera NPZ; evita strides muy pequeños en simulaciones largas.
+
+## Reproducibilidad y reportes
+- Fijar seed y anotar commit/versión del código.
+- Registrar parámetros exactos y entorno (CPU/GPU, librerías).
+- Usar reportes HTML:
+  - `GET /reports/run/{id}/html` y `GET /reports/experiment/{id}/html`.
+- Limpieza de datos:
+  - `POST /data/cleanup?days=30` para eliminar outputs/features antiguos.

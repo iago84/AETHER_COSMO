@@ -502,6 +502,36 @@ def download_series(run_id: int, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="series not found")
     return FileResponse(p)
 
+@app.get("/figures/{run_id}/series.mp4")
+def series_mp4(run_id: int, db: Session = Depends(get_session)):
+    obj = db.get(SimulationRun, run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="snapshot not found")
+    npz = Path(obj.snapshot_path).with_suffix(".npz")
+    if not npz.exists():
+        raise HTTPException(status_code=404, detail="series not found")
+    import matplotlib.pyplot as plt  # noqa: WPS433
+    import matplotlib.animation as animation  # noqa: WPS433
+    z = np.load(npz.as_posix())
+    frames = z["frames"]
+    fig = plt.Figure(figsize=(5, 4), dpi=120)
+    ax = fig.add_subplot(111)
+    im = ax.imshow(frames[0], cmap="viridis", origin="lower")
+    ax.set_title(f"Run {run_id} - serie")
+    def update(i):
+        im.set_data(frames[i])
+        return [im]
+    ani = animation.FuncAnimation(fig, update, frames=int(frames.shape[0]), interval=100, blit=True)
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"series_{run_id}.mp4"
+    try:
+        writer = animation.FFMpegWriter(fps=10)
+        ani.save(out_path.as_posix(), writer=writer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ffmpeg not available: {e}")
+    return FileResponse(out_path)
 
 @app.get("/figures/{run_id}/field")
 def download_field(run_id: int, db: Session = Depends(get_session)):
@@ -700,6 +730,27 @@ def ai_dbscan(payload: DbscanRequest):
     labels = dbscan_labels(X, eps=payload.eps, min_samples=payload.min_samples, metric=payload.metric)  # type: ignore[arg-type]
     return {"labels": labels.tolist()}
 
+class PcaPlotRequest(BaseModel):
+    X: list[list[float]]
+    n_components: int = 2
+
+@app.post("/ai/pca-plot")
+def ai_pca_plot(payload: PcaPlotRequest):
+    from sklearn.decomposition import PCA  # noqa: WPS433
+    import matplotlib.pyplot as plt  # noqa: WPS433
+    X = np.asarray(payload.X, dtype=np.float32)
+    pca = PCA(n_components=min(payload.n_components, X.shape[1]))
+    Y = pca.fit_transform(X)
+    fig = plt.Figure(figsize=(4, 3), dpi=120)
+    ax = fig.add_subplot(111)
+    ax.scatter(Y[:, 0], Y[:, 1], s=10, alpha=0.7)
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    ax.grid(True)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    img_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return {"image": img_b64}
 
 class DatasetIn(BaseModel):
     name: str
@@ -939,6 +990,35 @@ def report_run_html(run_id: int, crop: int = Query(default=64, ge=8, le=512), db
     )
     return Response(content=html, media_type="text/html")
 
+@app.get("/reports/experiment/{exp_id}/html")
+def report_experiment_html(exp_id: int, db: Session = Depends(get_session)):
+    exp = db.get(Experiment, exp_id)
+    if exp is None:
+        raise HTTPException(status_code=404, detail="experiment not found")
+    rows = db.execute(select(SimulationRun).where(SimulationRun.experiment_id == exp_id)).scalars().all()
+    cards = []
+    for r in rows:
+        if not r.snapshot_path:
+            continue
+        p = Path(r.snapshot_path)
+        if not p.exists():
+            continue
+        snap_b64 = "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
+        cards.append(
+            f"<div class='card'><h3>Run {r.id} ({r.status})</h3>"
+            f"<img src='{snap_b64}'/></div>"
+        )
+    html = (
+        "<!doctype html><html lang='es'><head><meta charset='utf-8'>"
+        f"<title>Reporte Experimento {exp_id}</title>"
+        "<style>body{font-family:Arial;margin:20px}.grid{display:grid;"
+        "grid-template-columns:repeat(3,1fr);gap:16px}.card{border:1px solid #ccc;"
+        "padding:10px;border-radius:8px}img{max-width:100%}</style></head><body>"
+        f"<h1>Reporte de Experimento {exp.name}</h1>"
+        f"<div class='grid'>{''.join(cards) if cards else '<p>Sin snapshots</p>'}</div>"
+        "</body></html>"
+    )
+    return Response(content=html, media_type="text/html")
 
 @app.post("/data/cleanup")
 def data_cleanup(days: int = 30):

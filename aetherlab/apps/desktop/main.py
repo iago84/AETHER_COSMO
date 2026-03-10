@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -39,13 +39,65 @@ def latest_snapshot() -> Path | None:
     return pngs[0] if pngs else None
 
 
+class RoiLabel(QLabel):
+    def __init__(self):
+        super().__init__()
+        self.setScaledContents(True)
+        self._dragging = False
+        self._x0 = 0
+        self._y0 = 0
+        self._x1 = 0
+        self._y1 = 0
+        self.on_roi_change = None
+
+    def mousePressEvent(self, e: QMouseEvent):
+        if e.buttons() & e.Button.LeftButton:
+            self._dragging = True
+            self._x0 = int(e.position().x())
+            self._y0 = int(e.position().y())
+            self._x1 = self._x0
+            self._y1 = self._y0
+            self.update()
+
+    def mouseMoveEvent(self, e: QMouseEvent):
+        if self._dragging:
+            self._x1 = int(e.position().x())
+            self._y1 = int(e.position().y())
+            self.update()
+
+    def mouseReleaseEvent(self, e: QMouseEvent):
+        if self._dragging:
+            self._dragging = False
+            x0 = min(self._x0, self._x1)
+            y0 = min(self._y0, self._y1)
+            w = abs(self._x1 - self._x0)
+            h = abs(self._y1 - self._y0)
+            if self.on_roi_change:
+                self.on_roi_change(x0, y0, w, h)
+            self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self._dragging or (self._x0 != self._x1 and self._y0 != self._y1):
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor(255, 0, 0), 2)
+            p.setPen(pen)
+            x0 = min(self._x0, self._x1)
+            y0 = min(self._y0, self._y1)
+            w = abs(self._x1 - self._x0)
+            h = abs(self._y1 - self._y0)
+            p.drawRect(x0, y0, w, h)
+            p.end()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AETHERLAB")
         self.resize(1024, 720)
-        self.label = QLabel("Sin snapshot")
-        self.label.setScaledContents(True)
+        self.label = RoiLabel()
+        self.label.setText("Sin snapshot")
         self.label.setMinimumSize(640, 480)
         btn_load = QPushButton("Cargar último snapshot")
         btn_sim = QPushButton("Simular (API)")
@@ -235,6 +287,13 @@ class MainWindow(QMainWindow):
         c = QWidget()
         c.setLayout(layout)
         self.setCentralWidget(c)
+        def _on_roi_change(x0, y0, w, h):
+            # Actualizar spinboxes de ROI
+            self.roi_x0.setValue(x0)
+            self.roi_y0.setValue(y0)
+            self.roi_w.setValue(max(1, w))
+            self.roi_h.setValue(max(1, h))
+        self.label.on_roi_change = _on_roi_change
         self.load_last()
 
     def load_last(self):

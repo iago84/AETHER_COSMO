@@ -1,0 +1,32 @@
+version: "3.9"
+services:
+  api:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - AETHERLAB_DB_URL=postgresql+psycopg2://aether:aether@db:5432/aetherlab
+      - REDIS_URL=redis://redis:6379/0
+    command: bash -c "pip install --no-cache-dir -r requirements.txt && uvicorn aetherlab.apps.api.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      - db
+      - redis
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=aether
+      - POSTGRES_PASSWORD=aether
+      - POSTGRES_DB=aetherlab
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+volumes:
+  pgdata:
