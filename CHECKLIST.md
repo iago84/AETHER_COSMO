@@ -22,9 +22,9 @@
 
 ### UI Desktop (PyQt6)
 - [x] Selector de proyecto/experimento (crear/listar/seleccionar)
-- [ ] Panel lateral de parámetros con presets y validación explícita
+- [x] Panel lateral de parámetros con presets y validación explícita
 - [x] Pestañas adicionales: Datos, IA, Comparación, Reportes, Configuración
-- [ ] Estados y progreso de jobs (queued/running/failed) con mensajes consistentes
+- [x] Estados y progreso de jobs (queued/running/failed) con mensajes consistentes
 - [x] Export unificado (CSV/PNG/NPZ/MP4/HTML) con diálogo y rutas claras
 
 ### API
@@ -36,8 +36,8 @@
 
 ### Simulación / Cálculos / Métricas
 - [x] Validaciones de estabilidad (dt/lam/diff/noise) y límites en UI/API
-- [ ] Métricas comparativas (distancias, correlación, similitud estructural)
-- [ ] Barridos de parámetros reproducibles y registro de configuraciones
+- [x] Métricas comparativas (distancias, correlación, similitud estructural)
+- [x] Barridos de parámetros reproducibles y registro de configuraciones
 - [x] Serie temporal: métricas por frame y export consistente (API/UI)
 
 ### Datos / ETL
@@ -50,12 +50,12 @@
 - [x] Formalizar “ModelRun” end-to-end (params, métricas, estado, outputs)
 - [x] IA sobre series/ventanas (no solo snapshots) con pipelines reproducibles
 - [x] Guardado de artefactos (CSV/figuras/modelos) y descarga segura
-- [ ] Visualizaciones rápidas (PCA/plots) integradas con el flujo de runs/datasets
+- [x] Visualizaciones rápidas (PCA/plots) integradas con el flujo de runs/datasets
 
 ### Reportes / Visualización
 - [x] Implementar `aether_report` (builder real) reutilizando la lógica del script HTML
 - [x] Reporte de experimento (parámetros + datasets + runs + métricas + figuras + notas)
-- [ ] Export académico adicional si se necesita (SVG/PDF) y estilos consistentes
+- [x] Export académico adicional si se necesita (SVG/PDF) y estilos consistentes
 
 ### Core / DB
 - [x] Añadir migraciones (Alembic u otro) para evolucionar el esquema sin hacks
@@ -64,8 +64,8 @@
 
 ### DevOps / CI
 - [ ] Docker Compose verificado (API+Redis+Postgres) y variables de entorno validadas
-- [ ] Healthchecks y logs adecuados para operación
-- [ ] CI con caching (pip) y tiempos estables
+- [x] Healthchecks y logs adecuados para operación
+- [x] CI con caching (pip) y tiempos estables
 
 ### QA
 - [x] Lint (ruff) sin errores

@@ -2,6 +2,7 @@ import hashlib
 import json
 import base64
 import io
+import itertools
 import os
 import time
 from pathlib import Path
@@ -35,7 +36,7 @@ from aetherlab.packages.aether_data.etl import (
     process_strain_to_features,
 )
 from aetherlab.packages.aether_ai.baseline import dbscan_labels, isolation_forest_score, pca_outlier_score
-from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, corrcoef2d, power_spectrum_radial
+from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, corrcoef2d, power_spectrum_radial, ssim2d
 from aetherlab.packages.aether_sim.simulator2d import Simulator2D
 from aetherlab.packages.aether_sim.sources import (
     gaussian_pulse,
@@ -149,21 +150,6 @@ def list_experiments(project_id: int | None = None, db: Session = Depends(get_se
     return [{"id": o.id, "name": o.name, "project_id": o.project_id} for o in rows]
 
 
-@app.post("/simulations")
-def create_simulation():
-    return {"id": "sim-1"}
-
-
-@app.post("/simulations/{sim_id}/run")
-def run_simulation(sim_id: str):
-    return {"sim_id": sim_id, "status": "queued"}
-
-
-@app.get("/simulations/{sim_id}/status")
-def status(sim_id: str):
-    return {"sim_id": sim_id, "state": "unknown"}
-
-
 class SimpleSimRequest(BaseModel):
     experiment_id: int
     nx: int = Field(default=128, ge=8, le=2048)
@@ -199,9 +185,7 @@ def _validate_sim_stability(payload: SimpleSimRequest):
         raise HTTPException(status_code=400, detail="source center out of bounds")
 
 
-@app.post("/simulate/simple")
-def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session)):
-    _validate_sim_stability(payload)
+def _run_simulation(payload: SimpleSimRequest) -> tuple[np.ndarray, list[np.ndarray]]:
     sim = Simulator2D(
         nx=payload.nx,
         ny=payload.ny,
@@ -230,7 +214,15 @@ def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session
         f = payload.frequency or 1.0
         sim.set_source(
             lambda x, y, t: periodic_gaussian(
-                x, y, t, payload.cx, payload.cy, sigma=payload.sigma, amplitude=payload.amplitude, dt=payload.dt, freq=f
+                x,
+                y,
+                t,
+                payload.cx,
+                payload.cy,
+                sigma=payload.sigma,
+                amplitude=payload.amplitude,
+                dt=payload.dt,
+                freq=f,
             )
         )
     elif payload.source_kind == "stochastic":
@@ -239,19 +231,33 @@ def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session
         r = payload.radius or 8.0
         sim.set_source(
             lambda x, y, t: top_hat(
-                x, y, t, payload.cx, payload.cy, radius=r, amplitude=payload.amplitude, duration=payload.duration
+                x,
+                y,
+                t,
+                payload.cx,
+                payload.cy,
+                radius=r,
+                amplitude=payload.amplitude,
+                duration=payload.duration,
             )
         )
     elif payload.source_kind == "lorentzian":
         g = payload.gamma or 8.0
         sim.set_source(
             lambda x, y, t: lorentzian(
-                x, y, t, payload.cx, payload.cy, gamma=g, amplitude=payload.amplitude, duration=payload.duration
+                x,
+                y,
+                t,
+                payload.cx,
+                payload.cy,
+                gamma=g,
+                amplitude=payload.amplitude,
+                duration=payload.duration,
             )
         )
     else:
         sim.set_source(lambda x, y, t: np.zeros_like(x, dtype=np.float32))
-    frames = []
+    frames: list[np.ndarray] = []
     if payload.save_series:
 
         def cb(t, u):
@@ -261,20 +267,32 @@ def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session
         sim.run(callback=cb)
     else:
         sim.run()
+    return sim.u.astype(np.float32), frames
+
+
+def _persist_sim_outputs(u: np.ndarray, frames: list[np.ndarray]) -> Path:
     root = Path(__file__).resolve().parents[3]
     out_dir = root / "aetherlab" / "data" / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = int(time.time())
+    stamp = int(time.time() * 1000)
     out_path = out_dir / f"snapshot_{stamp}.png"
-    fig, _ = show_field(sim.u)
+    fig, _ = show_field(u)
     fig.savefig(out_path.as_posix())
-    np.save(out_path.with_suffix(".npy").as_posix(), sim.u.astype(np.float32))
-    metrics = compute_metrics(sim.u)
+    np.save(out_path.with_suffix(".npy").as_posix(), u.astype(np.float32))
+    metrics = compute_metrics(u)
     with open(out_path.with_suffix(".json"), "w", encoding="utf-8") as f:
         json.dump(metrics, f)
-    if payload.save_series and frames:
+    if frames:
         series_path = out_path.with_suffix(".npz")
         np.savez_compressed(series_path.as_posix(), frames=np.array(frames, dtype=np.float32))
+    return out_path
+
+
+@app.post("/simulate/simple")
+def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session)):
+    _validate_sim_stability(payload)
+    u, frames = _run_simulation(payload)
+    out_path = _persist_sim_outputs(u, frames if payload.save_series else [])
     run = SimulationRun(
         experiment_id=payload.experiment_id,
         status="finished",
@@ -369,87 +387,8 @@ def _background_simulation(run_id: int, payload: AsyncSimRequest):
             return
         run.status = "running"
         db.commit()
-        sim = Simulator2D(
-            nx=payload.nx,
-            ny=payload.ny,
-            steps=payload.steps,
-            dt=payload.dt,
-            lam=payload.lam,
-            diff=payload.diff,
-            noise=payload.noise,
-            seed=payload.seed or 123,
-            boundary=payload.boundary,
-        )  # type: ignore[arg-type]
-        if payload.source_kind == "gaussian_pulse":
-            sim.set_source(
-                lambda x, y, t: gaussian_pulse(
-                    x,
-                    y,
-                    t,
-                    payload.cx,
-                    payload.cy,
-                    sigma=payload.sigma,
-                    duration=payload.duration,
-                    amplitude=payload.amplitude,
-                )
-            )
-        elif payload.source_kind == "periodic":
-            f = payload.frequency or 1.0
-            sim.set_source(
-                lambda x, y, t: periodic_gaussian(
-                    x,
-                    y,
-                    t,
-                    payload.cx,
-                    payload.cy,
-                    sigma=payload.sigma,
-                    amplitude=payload.amplitude,
-                    dt=payload.dt,
-                    freq=f,
-                )
-            )
-        elif payload.source_kind == "stochastic":
-            sim.set_source(lambda x, y, t: stochastic(x, y, t, amplitude=payload.amplitude))
-        elif payload.source_kind == "top_hat":
-            r = payload.radius or 8.0
-            sim.set_source(
-                lambda x, y, t: top_hat(
-                    x, y, t, payload.cx, payload.cy, radius=r, amplitude=payload.amplitude, duration=payload.duration
-                )
-            )
-        elif payload.source_kind == "lorentzian":
-            g = payload.gamma or 8.0
-            sim.set_source(
-                lambda x, y, t: lorentzian(
-                    x, y, t, payload.cx, payload.cy, gamma=g, amplitude=payload.amplitude, duration=payload.duration
-                )
-            )
-        else:
-            sim.set_source(lambda x, y, t: np.zeros_like(x, dtype=np.float32))
-        frames = []
-        if payload.save_series:
-
-            def cb(t, u):
-                if t % max(1, payload.series_stride) == 0:
-                    frames.append(u.copy())
-
-            sim.run(callback=cb)
-        else:
-            sim.run()
-        root = Path(__file__).resolve().parents[3]
-        out_dir = root / "aetherlab" / "data" / "outputs"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        stamp = int(time.time())
-        out_path = out_dir / f"snapshot_{stamp}.png"
-        fig, _ = show_field(sim.u)
-        fig.savefig(out_path.as_posix())
-        np.save(out_path.with_suffix(".npy").as_posix(), sim.u.astype(np.float32))
-        metrics = compute_metrics(sim.u)
-        with open(out_path.with_suffix(".json"), "w", encoding="utf-8") as f:
-            json.dump(metrics, f)
-        if payload.save_series and frames:
-            series_path = out_path.with_suffix(".npz")
-            np.savez_compressed(series_path.as_posix(), frames=np.array(frames, dtype=np.float32))
+        u, frames = _run_simulation(payload)
+        out_path = _persist_sim_outputs(u, frames if payload.save_series else [])
         run.snapshot_path = out_path.as_posix()
         run.status = "finished"
         db.commit()
@@ -489,6 +428,71 @@ def simulate_async(payload: AsyncSimRequest, background: BackgroundTasks, db: Se
     else:
         background.add_task(_background_simulation, run.id, payload)
         return {"run_id": run.id, "status": "queued", "backend": "background"}
+
+
+class SweepGridRequest(BaseModel):
+    experiment_id: int
+    base: dict = Field(default_factory=dict)
+    grid: dict[str, list] = Field(default_factory=dict)
+    max_runs: int = Field(default=50, ge=1, le=200)
+    save_series: bool = False
+    series_stride: int = Field(default=10, ge=1, le=100000)
+    seed_base: int | None = Field(default=None, ge=0, le=2_147_483_647)
+
+
+@app.post("/sweeps/grid")
+def sweeps_grid(payload: SweepGridRequest, background: BackgroundTasks, db: Session = Depends(get_session)):
+    if not payload.grid:
+        raise HTTPException(status_code=400, detail="grid is empty")
+    keys = list(payload.grid.keys())
+    values = [payload.grid[k] for k in keys]
+    total = 1
+    for v in values:
+        total *= max(0, len(v))
+    if total <= 0:
+        raise HTTPException(status_code=400, detail="grid has empty dimension")
+    if total > payload.max_runs:
+        raise HTTPException(status_code=413, detail=f"too many runs: {total} > {payload.max_runs}")
+    base_cfg = dict(payload.base or {})
+    base_cfg.pop("experiment_id", None)
+    base_cfg["experiment_id"] = payload.experiment_id
+    base_cfg["save_series"] = bool(payload.save_series)
+    base_cfg["series_stride"] = int(payload.series_stride)
+    run_ids: list[int] = []
+    use_rq = bool(os.environ.get("REDIS_URL"))
+    for idx, combo in enumerate(itertools.product(*values)):
+        cfg = dict(base_cfg)
+        cfg.update(dict(zip(keys, combo, strict=False)))
+        cfg["seed"] = int(payload.seed_base + idx) if payload.seed_base is not None else idx
+        sim_req = AsyncSimRequest(**cfg)
+        _validate_sim_stability(sim_req)
+        run = SimulationRun(
+            experiment_id=payload.experiment_id,
+            status="queued",
+            snapshot_path=None,
+            seed=sim_req.seed,
+            config_json=json.dumps(sim_req.model_dump(), ensure_ascii=False),
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        run_ids.append(run.id)
+        if use_rq:
+            try:
+                import redis
+                from rq import Queue
+
+                url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+                conn = redis.from_url(url)
+                q = Queue("aetherlab", connection=conn)
+                job = q.enqueue("scripts.rq_worker.run_sim_job", {"run_id": run.id, **sim_req.model_dump()})
+                run.job_id = job.get_id()
+                db.commit()
+                continue
+            except Exception:
+                pass
+        background.add_task(_background_simulation, run.id, sim_req)
+    return {"count": len(run_ids), "run_ids": run_ids, "backend": "rq" if use_rq else "background"}
 
 
 @app.post("/runs/{run_id}/abort")
@@ -565,6 +569,61 @@ def download_snapshot(run_id: int, db: Session = Depends(get_session)):
     if not p.exists():
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(p)
+
+
+def _export_snapshot_vector(run_id: int, fmt: str, db: Session) -> Response:
+    obj = db.get(SimulationRun, run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="snapshot not found")
+    try:
+        u = _load_field_for_run(obj)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="field not found")
+    fig, _ = show_field(u)
+    buf = io.BytesIO()
+    fig.savefig(buf, format=fmt, bbox_inches="tight")
+    body = buf.getvalue()
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(body).hexdigest()[:12]
+    out_path = out_dir / f"snapshot_{run_id}_{h}.{fmt}"
+    if not out_path.exists():
+        out_path.write_bytes(body)
+    kind = f"snapshot_{fmt}"
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.kind == kind,
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                experiment_id=obj.experiment_id,
+                kind=kind,
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
+    media = "image/svg+xml" if fmt == "svg" else "application/pdf"
+    return Response(content=body, media_type=media)
+
+
+@app.get("/figures/{run_id}/snapshot.svg")
+def download_snapshot_svg(run_id: int, db: Session = Depends(get_session)):
+    return _export_snapshot_vector(run_id, "svg", db)
+
+
+@app.get("/figures/{run_id}/snapshot.pdf")
+def download_snapshot_pdf(run_id: int, db: Session = Depends(get_session)):
+    return _export_snapshot_vector(run_id, "pdf", db)
 
 
 @app.get("/figures/{run_id}/metrics")
@@ -1647,7 +1706,11 @@ def _compare_fields(a: np.ndarray, b: np.ndarray) -> dict:
     d = a0 - b0
     mse = float(np.mean(d**2))
     mae = float(np.mean(np.abs(d)))
+    rmse = float(np.sqrt(mse))
     corr = float(corrcoef2d(a0, b0))
+    ssim = float(ssim2d(a0, b0))
+    denom = float(np.std(b0)) + 1e-12
+    nrmse = float(rmse / denom)
     k1, ps1 = power_spectrum_radial(a0)
     k2, ps2 = power_spectrum_radial(b0)
     n = int(min(len(ps1), len(ps2)))
@@ -1662,7 +1725,10 @@ def _compare_fields(a: np.ndarray, b: np.ndarray) -> dict:
         "shape_b": list(b0.shape),
         "mse": mse,
         "mae": mae,
+        "rmse": rmse,
+        "nrmse": nrmse,
         "corr": corr,
+        "ssim": ssim,
         "spectrum_l2": ps_l2,
         "a_stats": {"mean": float(np.mean(a0)), "std": float(np.std(a0))},
         "b_stats": {"mean": float(np.mean(b0)), "std": float(np.std(b0))},
@@ -1691,6 +1757,31 @@ def _compare_figure_png(a: np.ndarray, b: np.ndarray, title: str) -> bytes:
     fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight")
+    return buf.getvalue()
+
+
+def _compare_figure_bytes(a: np.ndarray, b: np.ndarray, title: str, fmt: str) -> bytes:
+    a0, b0 = _align_2d(a, b)
+    d = a0 - b0
+    fig = Figure(figsize=(10, 3.6), dpi=140)
+    ax1 = fig.add_subplot(1, 3, 1)
+    ax2 = fig.add_subplot(1, 3, 2)
+    ax3 = fig.add_subplot(1, 3, 3)
+    ax1.set_title("A")
+    ax2.set_title("B")
+    ax3.set_title("A-B")
+    im1 = ax1.imshow(a0, cmap="viridis", origin="lower")
+    im2 = ax2.imshow(b0, cmap="viridis", origin="lower")
+    im3 = ax3.imshow(d, cmap="coolwarm", origin="lower")
+    for ax in (ax1, ax2, ax3):
+        ax.set_xticks([])
+        ax.set_yticks([])
+    fig.suptitle(title)
+    fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+    fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+    fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+    buf = io.BytesIO()
+    fig.savefig(buf, format=fmt, bbox_inches="tight")
     return buf.getvalue()
 
 
@@ -1780,6 +1871,86 @@ def compare_run_run_figure(run_a: int, run_b: int, db: Session = Depends(get_ses
     return Response(content=png, media_type="image/png")
 
 
+@app.get("/compare/run-run/figure.svg")
+def compare_run_run_figure_svg(run_a: int, run_b: int, db: Session = Depends(get_session)):
+    a = db.get(SimulationRun, run_a)
+    b = db.get(SimulationRun, run_b)
+    if a is None or b is None or not a.snapshot_path or not b.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    ua = _load_field_for_run(a)
+    ub = _load_field_for_run(b)
+    body = _compare_figure_bytes(ua, ub, title=f"Run {run_a} vs Run {run_b}", fmt="svg")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(body).hexdigest()[:12]
+    out_path = out_dir / f"compare_run_run_{run_a}_{run_b}_{h}.svg"
+    if not out_path.exists():
+        out_path.write_bytes(body)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_a,
+                Artifact.kind == "compare_run_run_svg",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_a,
+                experiment_id=a.experiment_id,
+                kind="compare_run_run_svg",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
+    return Response(content=body, media_type="image/svg+xml")
+
+
+@app.get("/compare/run-run/figure.pdf")
+def compare_run_run_figure_pdf(run_a: int, run_b: int, db: Session = Depends(get_session)):
+    a = db.get(SimulationRun, run_a)
+    b = db.get(SimulationRun, run_b)
+    if a is None or b is None or not a.snapshot_path or not b.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    ua = _load_field_for_run(a)
+    ub = _load_field_for_run(b)
+    body = _compare_figure_bytes(ua, ub, title=f"Run {run_a} vs Run {run_b}", fmt="pdf")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(body).hexdigest()[:12]
+    out_path = out_dir / f"compare_run_run_{run_a}_{run_b}_{h}.pdf"
+    if not out_path.exists():
+        out_path.write_bytes(body)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_a,
+                Artifact.kind == "compare_run_run_pdf",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_a,
+                experiment_id=a.experiment_id,
+                kind="compare_run_run_pdf",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
+    return Response(content=body, media_type="application/pdf")
+
+
 @app.get("/compare/run-dataset")
 def compare_run_dataset(run_id: int, dataset_id: int, db: Session = Depends(get_session)):
     r = db.get(SimulationRun, run_id)
@@ -1837,6 +2008,96 @@ def compare_run_dataset_figure(run_id: int, dataset_id: int, db: Session = Depen
         )
         db.commit()
     return Response(content=png, media_type="image/png")
+
+
+@app.get("/compare/run-dataset/figure.svg")
+def compare_run_dataset_figure_svg(run_id: int, dataset_id: int, db: Session = Depends(get_session)):
+    r = db.get(SimulationRun, run_id)
+    ds = db.get(Dataset, dataset_id)
+    if r is None or not r.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    ua = _load_field_for_run(r)
+    p = _safe_data_path(Path(ds.path))
+    arr = _load_dataset_array(p)
+    body = _compare_figure_bytes(ua, arr, title=f"Run {run_id} vs Dataset {dataset_id}", fmt="svg")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(body).hexdigest()[:12]
+    out_path = out_dir / f"compare_run_dataset_{run_id}_{dataset_id}_{h}.svg"
+    if not out_path.exists():
+        out_path.write_bytes(body)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.dataset_id == dataset_id,
+                Artifact.kind == "compare_run_dataset_svg",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                dataset_id=dataset_id,
+                experiment_id=r.experiment_id,
+                kind="compare_run_dataset_svg",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
+    return Response(content=body, media_type="image/svg+xml")
+
+
+@app.get("/compare/run-dataset/figure.pdf")
+def compare_run_dataset_figure_pdf(run_id: int, dataset_id: int, db: Session = Depends(get_session)):
+    r = db.get(SimulationRun, run_id)
+    ds = db.get(Dataset, dataset_id)
+    if r is None or not r.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    ua = _load_field_for_run(r)
+    p = _safe_data_path(Path(ds.path))
+    arr = _load_dataset_array(p)
+    body = _compare_figure_bytes(ua, arr, title=f"Run {run_id} vs Dataset {dataset_id}", fmt="pdf")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(body).hexdigest()[:12]
+    out_path = out_dir / f"compare_run_dataset_{run_id}_{dataset_id}_{h}.pdf"
+    if not out_path.exists():
+        out_path.write_bytes(body)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.dataset_id == dataset_id,
+                Artifact.kind == "compare_run_dataset_pdf",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                dataset_id=dataset_id,
+                experiment_id=r.experiment_id,
+                kind="compare_run_dataset_pdf",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
+    return Response(content=body, media_type="application/pdf")
 
 @app.post("/data/cleanup")
 def data_cleanup(days: int = 30):

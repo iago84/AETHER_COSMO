@@ -57,3 +57,22 @@ def power_spectrum_radial(u: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     F = np.fft.fft2(u)
     ps = np.fft.fftshift(np.abs(F) ** 2)
     return radial_profile(ps)
+
+
+def ssim2d(a: np.ndarray, b: np.ndarray) -> float:
+    a0 = np.asarray(a, dtype=np.float32)
+    b0 = np.asarray(b, dtype=np.float32)
+    if a0.shape != b0.shape:
+        raise ValueError("ssim2d requires same shape")
+    mu_a = float(np.mean(a0))
+    mu_b = float(np.mean(b0))
+    va = float(np.var(a0))
+    vb = float(np.var(b0))
+    cov = float(np.mean((a0 - mu_a) * (b0 - mu_b)))
+    c1 = 1e-4
+    c2 = 9e-4
+    num = (2.0 * mu_a * mu_b + c1) * (2.0 * cov + c2)
+    den = (mu_a**2 + mu_b**2 + c1) * (va + vb + c2)
+    if den == 0.0:
+        return 0.0
+    return float(num / den)

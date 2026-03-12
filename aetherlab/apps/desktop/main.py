@@ -1,3 +1,4 @@
+import base64
 import csv
 import io
 import json
@@ -109,7 +110,7 @@ class MainWindow(QMainWindow):
         self.label.setText("Sin snapshot")
         self.label.setMinimumSize(640, 480)
         btn_load = QPushButton("Cargar último snapshot")
-        btn_sim = QPushButton("Simular (API)")
+        self.btn_sim = QPushButton("Simular (API)")
         btn_series = QPushButton("Cargar serie (NPZ)")
         btn_spec = QPushButton("Espectro (API)")
         btn_ac = QPushButton("Autocorr (API)")
@@ -131,7 +132,7 @@ class MainWindow(QMainWindow):
         self.frame_idx.setRange(0, 100000)
         self.frame_idx.setValue(0)
         btn_load.clicked.connect(self.load_last)
-        btn_sim.clicked.connect(self.simulate_demo)
+        self.btn_sim.clicked.connect(self.simulate_demo)
         btn_series.clicked.connect(self.load_series_plot)
         btn_spec.clicked.connect(self.load_spectrum_api)
         btn_ac.clicked.connect(self.load_autocorr_api)
@@ -152,6 +153,9 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.setInterval(200)
         self.timer.timeout.connect(self.advance_frame)
+        self.status_timer = QTimer(self)
+        self.status_timer.setInterval(1000)
+        self.status_timer.timeout.connect(self.refresh_run_state)
         self.series_frames = None
         self.run_id = QSpinBox()
         self.run_id.setRange(1, 1000000)
@@ -164,14 +168,37 @@ class MainWindow(QMainWindow):
         self.steps = QSpinBox()
         self.steps.setRange(1, 10000)
         self.steps.setValue(60)
+        self.nx = QSpinBox()
+        self.nx.setRange(8, 2048)
+        self.nx.setValue(128)
+        self.ny = QSpinBox()
+        self.ny.setRange(8, 2048)
+        self.ny.setValue(128)
         self.dt = QDoubleSpinBox()
         self.dt.setDecimals(4)
         self.dt.setSingleStep(0.01)
         self.dt.setRange(0.0001, 1.0)
         self.dt.setValue(0.05)
+        self.lam = QDoubleSpinBox()
+        self.lam.setRange(0.0, 10.0)
+        self.lam.setValue(0.5)
+        self.diff = QDoubleSpinBox()
+        self.diff.setRange(0.0, 10.0)
+        self.diff.setValue(0.2)
+        self.noise = QDoubleSpinBox()
+        self.noise.setRange(0.0, 10.0)
+        self.noise.setValue(0.0)
+        self.seed_auto = QCheckBox("Seed auto")
+        self.seed_auto.setChecked(True)
+        self.seed = QSpinBox()
+        self.seed.setRange(0, 2_147_483_647)
+        self.seed.setValue(42)
         self.sigma = QDoubleSpinBox()
         self.sigma.setRange(0.1, 100.0)
         self.sigma.setValue(8.0)
+        self.duration = QSpinBox()
+        self.duration.setRange(1, 1000000)
+        self.duration.setValue(20)
         self.radius = QDoubleSpinBox()
         self.radius.setRange(0.1, 100.0)
         self.radius.setValue(8.0)
@@ -184,6 +211,15 @@ class MainWindow(QMainWindow):
         self.freq = QDoubleSpinBox()
         self.freq.setRange(0.0, 10.0)
         self.freq.setValue(1.0)
+        self.cx = QSpinBox()
+        self.cy = QSpinBox()
+        self.cx.setRange(0, 4096)
+        self.cy.setRange(0, 4096)
+        self.cx.setValue(64)
+        self.cy.setValue(64)
+        self.async_run = QCheckBox("Asíncrono")
+        self.auto_refresh = QCheckBox("Auto refrescar")
+        self.auto_refresh.setChecked(True)
         self.save_series = QCheckBox("Guardar serie")
         self.series_stride = QSpinBox()
         self.series_stride.setRange(1, 1000)
@@ -204,6 +240,18 @@ class MainWindow(QMainWindow):
         self.roi_y0.valueChanged.connect(self.update_roi_dynamic)
         self.roi_w.valueChanged.connect(self.update_roi_dynamic)
         self.roi_h.valueChanged.connect(self.update_roi_dynamic)
+        self.preset_cb = QComboBox()
+        self.preset_cb.addItems(["Custom", "Estable rápido", "Alta difusión", "Con ruido"])
+        self.preset_cb.currentIndexChanged.connect(self.apply_sim_preset)
+        self.validation_label = QLabel("validación: -")
+        self.nx.valueChanged.connect(self.update_sim_ranges)
+        self.ny.valueChanged.connect(self.update_sim_ranges)
+        for w in (self.dt, self.lam, self.diff, self.noise, self.cx, self.cy):
+            w.valueChanged.connect(self.update_validation_ui)
+        self.source.currentIndexChanged.connect(self.update_validation_ui)
+        self.boundary.currentIndexChanged.connect(self.update_validation_ui)
+        self.seed_auto.stateChanged.connect(self.update_validation_ui)
+        self.auto_refresh.stateChanged.connect(self.on_auto_refresh_toggle)
         left = QVBoxLayout()
         left.addWidget(QLabel("API base"))
         left.addWidget(self.base_url)
@@ -224,6 +272,16 @@ class MainWindow(QMainWindow):
         rowe2.addWidget(btn_experiments_new)
         left.addLayout(rowe2)
         left.addWidget(QLabel("Parámetros de simulación"))
+        sp = QHBoxLayout()
+        sp.addWidget(QLabel("Preset"))
+        sp.addWidget(self.preset_cb)
+        left.addLayout(sp)
+        s0 = QHBoxLayout()
+        s0.addWidget(QLabel("nx"))
+        s0.addWidget(self.nx)
+        s0.addWidget(QLabel("ny"))
+        s0.addWidget(self.ny)
+        left.addLayout(s0)
         s1 = QHBoxLayout()
         s1.addWidget(QLabel("Fuente"))
         s1.addWidget(self.source)
@@ -236,6 +294,27 @@ class MainWindow(QMainWindow):
         s2.addWidget(QLabel("dt"))
         s2.addWidget(self.dt)
         left.addLayout(s2)
+        s2b = QHBoxLayout()
+        s2b.addWidget(QLabel("lam"))
+        s2b.addWidget(self.lam)
+        s2b.addWidget(QLabel("diff"))
+        s2b.addWidget(self.diff)
+        s2b.addWidget(QLabel("noise"))
+        s2b.addWidget(self.noise)
+        left.addLayout(s2b)
+        s2c = QHBoxLayout()
+        s2c.addWidget(QLabel("cx"))
+        s2c.addWidget(self.cx)
+        s2c.addWidget(QLabel("cy"))
+        s2c.addWidget(self.cy)
+        s2c.addWidget(QLabel("dur"))
+        s2c.addWidget(self.duration)
+        left.addLayout(s2c)
+        s2d = QHBoxLayout()
+        s2d.addWidget(self.seed_auto)
+        s2d.addWidget(QLabel("seed"))
+        s2d.addWidget(self.seed)
+        left.addLayout(s2d)
         s3 = QHBoxLayout()
         s3.addWidget(QLabel("amp"))
         s3.addWidget(self.amp)
@@ -256,17 +335,22 @@ class MainWindow(QMainWindow):
         s6.addWidget(self.save_series)
         s6.addWidget(QLabel("stride"))
         s6.addWidget(self.series_stride)
+        s6.addWidget(self.async_run)
+        s6.addWidget(self.auto_refresh)
         left.addLayout(s6)
         sb = QHBoxLayout()
-        sb.addWidget(btn_sim)
+        sb.addWidget(self.btn_sim)
         sb.addWidget(btn_load)
         left.addLayout(sb)
+        left.addWidget(self.validation_label)
         self.export_kind = QComboBox()
         self.export_kind.addItems(
             [
                 "Reporte HTML",
                 "Métricas CSV",
                 "Snapshot PNG",
+                "Snapshot SVG",
+                "Snapshot PDF",
                 "Serie NPZ",
                 "Campo NPY",
                 "ROI CSV",
@@ -379,6 +463,94 @@ class MainWindow(QMainWindow):
         self.init_config_tab()
         self.refresh_projects()
         self.load_last()
+        self.update_sim_ranges()
+        self.update_validation_ui()
+        self.on_auto_refresh_toggle()
+
+    def update_sim_ranges(self):
+        nx = int(self.nx.value())
+        ny = int(self.ny.value())
+        self.cx.setRange(0, max(0, nx - 1))
+        self.cy.setRange(0, max(0, ny - 1))
+        self.cx.setValue(min(int(self.cx.value()), max(0, nx - 1)))
+        self.cy.setValue(min(int(self.cy.value()), max(0, ny - 1)))
+        self.update_validation_ui()
+
+    def validate_sim_params(self) -> tuple[bool, str]:
+        dt = float(self.dt.value())
+        lam = float(self.lam.value())
+        diff = float(self.diff.value())
+        noise = float(self.noise.value())
+        nx = int(self.nx.value())
+        ny = int(self.ny.value())
+        cx = int(self.cx.value())
+        cy = int(self.cy.value())
+        if dt * diff > 1.0:
+            return False, "inestable: dt*diff > 1.0"
+        if dt * lam > 1.0:
+            return False, "inestable: dt*lam > 1.0"
+        if noise > 0.0 and dt * noise > 1.0:
+            return False, "inestable: dt*noise > 1.0"
+        if cx >= nx or cy >= ny:
+            return False, "fuente fuera de límites"
+        return True, "ok"
+
+    def update_validation_ui(self):
+        ok, msg = self.validate_sim_params()
+        self.validation_label.setText(f"validación: {msg}")
+        self.btn_sim.setEnabled(bool(ok))
+        self.seed.setEnabled(not self.seed_auto.isChecked())
+
+    def on_auto_refresh_toggle(self):
+        if self.auto_refresh.isChecked():
+            self.status_timer.start()
+        else:
+            self.status_timer.stop()
+
+    def apply_sim_preset(self):
+        name = self.preset_cb.currentText()
+        if name == "Estable rápido":
+            self.nx.setValue(128)
+            self.ny.setValue(128)
+            self.steps.setValue(80)
+            self.dt.setValue(0.05)
+            self.lam.setValue(0.5)
+            self.diff.setValue(0.2)
+            self.noise.setValue(0.0)
+            self.source.setCurrentText("gaussian_pulse")
+            self.boundary.setCurrentText("periodic")
+            self.sigma.setValue(8.0)
+            self.duration.setValue(20)
+            self.amp.setValue(1.0)
+        elif name == "Alta difusión":
+            self.nx.setValue(128)
+            self.ny.setValue(128)
+            self.steps.setValue(120)
+            self.dt.setValue(0.02)
+            self.lam.setValue(0.2)
+            self.diff.setValue(0.8)
+            self.noise.setValue(0.0)
+            self.source.setCurrentText("gaussian_pulse")
+            self.boundary.setCurrentText("absorbing")
+            self.sigma.setValue(10.0)
+            self.duration.setValue(30)
+            self.amp.setValue(1.0)
+        elif name == "Con ruido":
+            self.nx.setValue(128)
+            self.ny.setValue(128)
+            self.steps.setValue(120)
+            self.dt.setValue(0.03)
+            self.lam.setValue(0.4)
+            self.diff.setValue(0.3)
+            self.noise.setValue(0.2)
+            self.source.setCurrentText("stochastic")
+            self.boundary.setCurrentText("periodic")
+            self.sigma.setValue(8.0)
+            self.duration.setValue(20)
+            self.amp.setValue(0.8)
+        self.cx.setValue(int(self.nx.value()) // 2)
+        self.cy.setValue(int(self.ny.value()) // 2)
+        self.update_sim_ranges()
 
     def api_base(self) -> str:
         return self.base_url.text().strip().rstrip("/")
@@ -478,6 +650,12 @@ class MainWindow(QMainWindow):
         if k == "Snapshot PNG":
             self.download_snapshot()
             return
+        if k == "Snapshot SVG":
+            self.download_snapshot_svg()
+            return
+        if k == "Snapshot PDF":
+            self.download_snapshot_pdf()
+            return
         if k == "Serie NPZ":
             self.download_series()
             return
@@ -576,13 +754,18 @@ class MainWindow(QMainWindow):
         self.ai_method.addItems(["isoforest", "mean_dist"])
         self.ai_out = QTextEdit()
         self.ai_out.setReadOnly(True)
+        self.ai_img = QLabel()
+        self.ai_img.setMinimumHeight(240)
+        self.ai_img.setScaledContents(True)
         btn_ai_run_run = QPushButton("IA sobre run")
         btn_ai_run_series = QPushButton("IA sobre serie")
         btn_ai_run_ds = QPushButton("IA sobre dataset")
+        btn_ai_pca_series = QPushButton("PCA serie")
         btn_ai_models = QPushButton("ModelRuns")
         btn_ai_run_run.clicked.connect(self.ai_run_on_run)
         btn_ai_run_series.clicked.connect(self.ai_run_on_run_series)
         btn_ai_run_ds.clicked.connect(self.ai_run_on_dataset)
+        btn_ai_pca_series.clicked.connect(self.ai_pca_on_run_series)
         btn_ai_models.clicked.connect(self.ai_list_models)
         row = QHBoxLayout()
         row.addWidget(QLabel("Método"))
@@ -590,11 +773,33 @@ class MainWindow(QMainWindow):
         row.addWidget(btn_ai_run_run)
         row.addWidget(btn_ai_run_series)
         row.addWidget(btn_ai_run_ds)
+        row.addWidget(btn_ai_pca_series)
         row.addWidget(btn_ai_models)
         lay = QVBoxLayout()
         lay.addLayout(row)
+        lay.addWidget(self.ai_img)
         lay.addWidget(self.ai_out)
         self.ai_tab.setLayout(lay)
+
+    def ai_pca_on_run_series(self):
+        try:
+            run_id = int(self.run_id.value())
+            o = json.loads(self.http_get_text(f"/figures/{run_id}/series-metrics", timeout=40))
+            series = o.get("series") or []
+            X = [[m["energy"], m["mean"], m["variance"], m["spatial_corr"]] for m in series]
+            if not X:
+                self.ai_out.setPlainText("No hay serie de métricas para PCA")
+                return
+            out = self.http_post_json("/ai/pca-plot", {"X": X, "n_components": 2}, timeout=60)
+            img = out.get("image") or ""
+            if img.startswith("data:image/png;base64,"):
+                raw = base64.b64decode(img.split(",", 1)[1])
+                pix = QPixmap()
+                pix.loadFromData(raw)
+                self.ai_img.setPixmap(pix)
+            self.ai_out.setPlainText(json.dumps(out, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.ai_out.setPlainText(str(e))
 
     def ai_run_on_run(self):
         try:
@@ -815,18 +1020,32 @@ class MainWindow(QMainWindow):
 
     def simulate_demo(self):
         try:
+            ok, msg = self.validate_sim_params()
+            if not ok:
+                QMessageBox.warning(self, "Validación", msg)
+                return
             eid = self.current_experiment_id()
             if eid is None:
                 QMessageBox.information(self, "Simulación", "Selecciona o crea un experimento primero")
                 return
             source = self.source.currentText()
+            seed = None if self.seed_auto.isChecked() else int(self.seed.value())
             payload = {
                 "experiment_id": eid,
+                "nx": int(self.nx.value()),
+                "ny": int(self.ny.value()),
                 "steps": int(self.steps.value()),
                 "dt": float(self.dt.value()),
+                "lam": float(self.lam.value()),
+                "diff": float(self.diff.value()),
+                "noise": float(self.noise.value()),
+                "seed": seed,
                 "boundary": self.boundary.currentText(),
                 "source_kind": source,
+                "cx": int(self.cx.value()),
+                "cy": int(self.cy.value()),
                 "sigma": float(self.sigma.value()),
+                "duration": int(self.duration.value()),
                 "radius": float(self.radius.value()),
                 "gamma": float(self.gamma.value()),
                 "amplitude": float(self.amp.value()),
@@ -834,11 +1053,17 @@ class MainWindow(QMainWindow):
                 "save_series": bool(self.save_series.isChecked()),
                 "series_stride": int(self.series_stride.value()),
             }
-            o = self.http_post_json("/simulate/simple", payload, timeout=25)
+            if self.async_run.isChecked():
+                o = self.http_post_json("/simulate/async", payload, timeout=25)
+            else:
+                o = self.http_post_json("/simulate/simple", payload, timeout=25)
             if "run_id" in o:
                 self.run_id.setValue(int(o["run_id"]))
                 self.rep_run_id.setValue(int(o["run_id"]))
-            self.load_last()
+            if not self.async_run.isChecked():
+                self.load_last()
+            if self.auto_refresh.isChecked():
+                self.status_timer.start()
             QMessageBox.information(self, "Simulación", f"Ejecutada: {json.dumps(o, ensure_ascii=False)}")
         except urllib.error.URLError as e:
             QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
@@ -1059,7 +1284,13 @@ class MainWindow(QMainWindow):
         try:
             run_id = int(self.run_id.value())
             o = json.loads(self.http_get_text(f"/runs/{run_id}", timeout=15))
-            self.status_label.setText(f"status: {o.get('status','-')}")
+            st = o.get("status", "-")
+            backend = o.get("backend", "-")
+            job_id = o.get("job_id", None)
+            extra = f"{backend}" + (f":{job_id}" if job_id else "")
+            self.status_label.setText(f"status: {st} ({extra})")
+            if self.auto_refresh.isChecked() and st in ("finished", "failed", "cancelled", "cleaned"):
+                self.status_timer.stop()
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
 
@@ -1086,6 +1317,46 @@ class MainWindow(QMainWindow):
             if not path:
                 return
             data = self.http_get(f"/figures/{run_id}/snapshot", timeout=25)
+            with open(path, "wb") as f:
+                f.write(data)
+            QMessageBox.information(self, "Descarga", f"Guardado en {path}")
+        except urllib.error.URLError as e:
+            QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def download_snapshot_svg(self):
+        try:
+            run_id = int(self.run_id.value())
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Guardar snapshot (SVG)",
+                f"snapshot_{run_id}.svg",
+                "SVG (*.svg)",
+            )
+            if not path:
+                return
+            data = self.http_get(f"/figures/{run_id}/snapshot.svg", timeout=40)
+            with open(path, "wb") as f:
+                f.write(data)
+            QMessageBox.information(self, "Descarga", f"Guardado en {path}")
+        except urllib.error.URLError as e:
+            QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def download_snapshot_pdf(self):
+        try:
+            run_id = int(self.run_id.value())
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Guardar snapshot (PDF)",
+                f"snapshot_{run_id}.pdf",
+                "PDF (*.pdf)",
+            )
+            if not path:
+                return
+            data = self.http_get(f"/figures/{run_id}/snapshot.pdf", timeout=40)
             with open(path, "wb") as f:
                 f.write(data)
             QMessageBox.information(self, "Descarga", f"Guardado en {path}")
