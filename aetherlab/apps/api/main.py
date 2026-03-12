@@ -46,6 +46,24 @@ app = FastAPI(title="AETHERLAB API", version="0.1.0")
 def on_startup():
     Base.metadata.create_all(bind=ENGINE)
     ensure_schema()
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler  # noqa: WPS433
+        s = BackgroundScheduler()
+        days = int(os.environ.get("AETHERLAB_CLEANUP_DAYS", "30"))
+        s.add_job(lambda: data_cleanup(days), trigger="cron", hour=3, minute=0)
+        s.start()
+        app.state.scheduler = s  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+@app.on_event("shutdown")
+def on_shutdown():
+    s = getattr(app.state, "scheduler", None)  # type: ignore[attr-defined]
+    if s is not None:
+        try:
+            s.shutdown(wait=False)
+        except Exception:
+            pass
 
 
 @app.get("/health")
@@ -60,6 +78,9 @@ class ProjectIn(BaseModel):
 
 @app.post("/projects")
 def create_project(payload: ProjectIn, db: Session = Depends(get_session)):
+    existing = db.execute(select(Project).where(Project.name == payload.name)).scalars().first()
+    if existing is not None:
+        return {"id": existing.id, "name": existing.name}
     obj = Project(name=payload.name, description=payload.description)
     db.add(obj)
     db.commit()
@@ -730,6 +751,53 @@ def ai_dbscan(payload: DbscanRequest):
     labels = dbscan_labels(X, eps=payload.eps, min_samples=payload.min_samples, metric=payload.metric)  # type: ignore[arg-type]
     return {"labels": labels.tolist()}
 
+class HdbscanRequest(BaseModel):
+    X: list[list[float]]
+    min_cluster_size: int = 5
+    min_samples: int | None = None
+    metric: str = "euclidean"
+
+@app.post("/ai/hdbscan")
+def ai_hdbscan(payload: HdbscanRequest):
+    X = np.asarray(payload.X, dtype=np.float32)
+    import hdbscan  # noqa: WPS433
+    algo = hdbscan.HDBSCAN(
+        min_cluster_size=payload.min_cluster_size,
+        min_samples=payload.min_samples,
+        metric=payload.metric,
+    )
+    labels = algo.fit_predict(X)
+    probs = getattr(algo, "probabilities_", None)
+    return {"labels": labels.tolist(), "probabilities": probs.tolist() if probs is not None else None}
+
+class HdbscanTreeRequest(BaseModel):
+    X: list[list[float]]
+    min_cluster_size: int = 5
+    min_samples: int | None = None
+    metric: str = "euclidean"
+
+@app.post("/ai/hdbscan-tree")
+def ai_hdbscan_tree(payload: HdbscanTreeRequest):
+    import hdbscan  # noqa: WPS433
+    X = np.asarray(payload.X, dtype=np.float32)
+    algo = hdbscan.HDBSCAN(
+        min_cluster_size=payload.min_cluster_size,
+        min_samples=payload.min_samples,
+        metric=payload.metric,
+    )
+    algo.fit(X)
+    df = algo.condensed_tree_.to_pandas()
+    edges = []
+    for _, row in df.iterrows():
+        edges.append(
+            {
+                "parent": int(row["parent"]),
+                "child": int(row["child"]),
+                "lambda": float(row["lambda_val"]),
+                "size": int(row["child_size"]),
+            }
+        )
+    return {"edges": edges}
 class PcaPlotRequest(BaseModel):
     X: list[list[float]]
     n_components: int = 2
@@ -997,6 +1065,7 @@ def report_experiment_html(exp_id: int, db: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="experiment not found")
     rows = db.execute(select(SimulationRun).where(SimulationRun.experiment_id == exp_id)).scalars().all()
     cards = []
+    agg = {"mean": [], "std": []}
     for r in rows:
         if not r.snapshot_path:
             continue
@@ -1004,18 +1073,37 @@ def report_experiment_html(exp_id: int, db: Session = Depends(get_session)):
         if not p.exists():
             continue
         snap_b64 = "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
+        arts = db.execute(select(Artifact).where(Artifact.run_id == r.id)).scalars().all()
+        links = "".join([f"<li><a href='/ai/download?path={a.path}'>{a.kind}</a></li>" for a in arts])
+        try:
+            u = _load_field_for_run(r)
+            m = float(np.mean(u))
+            s = float(np.std(u))
+            agg["mean"].append(m)
+            agg["std"].append(s)
+            stats = f"<div>mean={m:.3f} std={s:.3f}</div>"
+        except Exception:
+            stats = "<div>sin métricas</div>"
         cards.append(
             f"<div class='card'><h3>Run {r.id} ({r.status})</h3>"
-            f"<img src='{snap_b64}'/></div>"
+            f"<img src='{snap_b64}'/><ul>{links or '<li>Sin artefactos</li>'}</ul>{stats}</div>"
         )
+    mrs = db.execute(select(ModelRun).where(ModelRun.experiment_id == exp_id)).scalars().all()
+    models = "".join([f"<li>{m.model_name}: {m.status}</li>" for m in mrs]) or "<li>Sin modelos</li>"
+    if agg["mean"]:
+        exp_stats = f"<li>mean_avg={np.mean(agg['mean']):.3f}</li><li>std_avg={np.mean(agg['std']):.3f}</li>"
+    else:
+        exp_stats = "<li>sin métricas</li>"
     html = (
         "<!doctype html><html lang='es'><head><meta charset='utf-8'>"
         f"<title>Reporte Experimento {exp_id}</title>"
         "<style>body{font-family:Arial;margin:20px}.grid{display:grid;"
         "grid-template-columns:repeat(3,1fr);gap:16px}.card{border:1px solid #ccc;"
-        "padding:10px;border-radius:8px}img{max-width:100%}</style></head><body>"
+        "padding:10px;border-radius:8px}img{max-width:100%}ul{margin-top:8px}</style></head><body>"
         f"<h1>Reporte de Experimento {exp.name}</h1>"
-        f"<div class='grid'>{''.join(cards) if cards else '<p>Sin snapshots</p>'}</div>"
+        f"<h2>Modelos</h2><ul>{models}</ul>"
+        f"<h2>Mini-métricas</h2><ul>{exp_stats}</ul>"
+        f"<h2>Runs</h2><div class='grid'>{''.join(cards) if cards else '<p>Sin snapshots</p>'}</div>"
         "</body></html>"
     )
     return Response(content=html, media_type="text/html")

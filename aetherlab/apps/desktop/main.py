@@ -191,6 +191,10 @@ class MainWindow(QMainWindow):
         self.roi_y0.setRange(0, 2048)
         self.roi_w.setRange(1, 2048)
         self.roi_h.setRange(1, 2048)
+        self.roi_x0.valueChanged.connect(self.update_roi_dynamic)
+        self.roi_y0.valueChanged.connect(self.update_roi_dynamic)
+        self.roi_w.valueChanged.connect(self.update_roi_dynamic)
+        self.roi_h.valueChanged.connect(self.update_roi_dynamic)
         layout = QVBoxLayout()
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Fuente"))
@@ -384,6 +388,50 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
+
+    def update_roi_dynamic(self):
+        try:
+            run_id = int(self.run_id.value())
+            base = "http://127.0.0.1:8000"
+            x0 = int(self.roi_x0.value())
+            y0 = int(self.roi_y0.value())
+            w = int(self.roi_w.value())
+            h = int(self.roi_h.value())
+            # Spectrum with ROI
+            data_all = urllib.request.urlopen(f"{base}/figures/{run_id}/spectrum", timeout=10).read().decode()
+            o_all = json.loads(data_all)
+            url_roi = f"{base}/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            data_roi = urllib.request.urlopen(url_roi, timeout=10).read().decode()
+            o_roi = json.loads(data_roi)
+            k_all = np.array(o_all["k"])
+            ps_all = np.array(o_all["ps"])
+            k_roi = np.array(o_roi["k"])
+            ps_roi = np.array(o_roi["ps"])
+            self.fig2.clear()
+            ax2 = self.fig2.add_subplot(111)
+            if self.spec_log.isChecked():
+                ax2.semilogy(k_all, ps_all, label="Espectro global")
+                ax2.semilogy(k_roi, ps_roi, label="Espectro ROI")
+            else:
+                ax2.plot(k_all, ps_all, label="Espectro global")
+                ax2.plot(k_roi, ps_roi, label="Espectro ROI")
+            ax2.set_xlabel("k")
+            ax2.set_ylabel("potencia")
+            ax2.grid(True)
+            ax2.legend()
+            self.canvas2.draw_idle()
+            # Autocorr with ROI
+            url_ac = f"{base}/figures/{run_id}/autocorr-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            data_ac = urllib.request.urlopen(url_ac, timeout=10).read().decode()
+            o_ac = json.loads(data_ac)
+            ac = np.array(o_ac["autocorr"])
+            self.fig3.clear()
+            ax3 = self.fig3.add_subplot(111)
+            im = ax3.imshow(ac, cmap="viridis", origin="lower")
+            self.fig3.colorbar(im, ax=ax3, fraction=0.046, pad=0.04)
+            self.canvas3.draw_idle()
+        except Exception:
+            pass
 
     def load_autocorr_api(self):
         try:
