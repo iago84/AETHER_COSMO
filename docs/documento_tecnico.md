@@ -29,7 +29,8 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
   - Control de parámetros (fuente, boundary, steps, dt, amplitud, etc.).
   - Pestañas de visualización: energía vs tiempo, espectro radial (lineal/log), autocorrelación 2D con recorte.
   - Reproducción de series NPZ con control de frame actual.
-  - Gestión de runs: estado, abortar, reintentar, descarga de artefactos y export de métricas CSV.
+  - Selector de proyecto/experimento, pestañas de Datos/IA/Comparación/Reportes/Configuración y export unificado.
+  - Gestión de runs: estado, abortar, reintentar, descarga de artefactos y export (CSV/PNG/NPZ/MP4/HTML).
 - Capa Core (`aetherlab/packages/aether_core`):
   - ORM SQLAlchemy. Modelos `Project`, `Experiment`, `SimulationRun` (incluye `job_id`).
   - DB configurable por `AETHERLAB_DB_URL` (SQLite por defecto). Ajuste de esquema en arranque.
@@ -55,8 +56,10 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
 - Runs: `GET /runs`, `GET /runs/{id}`, `POST /runs/{id}/refresh`, `POST /runs/{id}/abort`, `POST /runs/{id}/retry`, `POST /runs/{id}/cleanup`
 - Simulación: `POST /simulate/simple`, `POST /simulate/async`
 - Resultados: `GET /figures/{run}/snapshot|metrics|field|series|series-metrics|spectrum|autocorr`
-- Datos: `GET /data/datasets`, `POST /data/load`, `POST/GET /datasets`, `POST /experiments/{eid}/datasets/link`
-- IA: `POST /ai/outlier-score`, `POST /ai/dbscan`, `POST /ai/run-on-run`, `POST /ai/run-on-dataset`, `GET /ai/download`
+- Datos: `GET /data/datasets`, `POST /data/load`, `POST/GET /datasets`, `GET /datasets/{id}/meta`, `POST /etl/dataset`, `POST /experiments/{eid}/datasets/link`
+- IA: `POST /ai/outlier-score`, `POST /ai/dbscan`, `POST /ai/run-on-run`, `POST /ai/run-on-dataset`, `GET /ai/download`, `GET /models`
+- Comparación: `GET /compare/run-run`, `GET /compare/run-dataset` (+ `.../figure.png`)
+- Reportes: `GET /reports/run/{id}/html`, `GET /reports/experiment/{id}/html`
 
 ## Diseño Numérico
 - Laplaciano con condiciones de contorno:
@@ -69,6 +72,11 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
 - Directorio: `aetherlab/data/outputs/`
 - Archivos por run:
   - `snapshot_*.png`, `snapshot_*.json`, `snapshot_*.npy`, `snapshot_*.npz` (si serie activa)
+  - Derivados: features (`*.npz`) y QC (`*.qc.json`) bajo `aetherlab/data/features/` (ETL)
+  - Comparación: figura PNG retornada por endpoint (no persistida por defecto)
+
+## Migraciones
+- Migración ligera en arranque (sin Alembic): tabla `schema_migrations` y `ALTER TABLE` idempotentes para columnas nuevas.
 
 ## Asíncrono y Estados
 - BackgroundTasks: ejecución inline del proceso de app.

@@ -32,18 +32,28 @@ python scripts\rq_worker.py
 
 ```python
 import json, urllib.request
+
 base="http://127.0.0.1:8000"
-req = urllib.request.Request(base+"/projects", data=json.dumps({"name":"Demo","description":"Proyecto"}).encode(), headers={"Content-Type":"application/json"})
-print(urllib.request.urlopen(req).read().decode())
-req = urllib.request.Request(base+"/experiments", data=json.dumps({"project_id":1,"name":"Exp1"}).encode(), headers={"Content-Type":"application/json"})
-print(urllib.request.urlopen(req).read().decode())
+req = urllib.request.Request(
+  base+"/projects",
+  data=json.dumps({"name":"Demo","description":"Proyecto"}).encode(),
+  headers={"Content-Type":"application/json"},
+)
+project = json.loads(urllib.request.urlopen(req).read().decode())
+req = urllib.request.Request(
+  base+"/experiments",
+  data=json.dumps({"project_id": project["id"], "name":"Exp1"}).encode(),
+  headers={"Content-Type":"application/json"},
+)
+experiment = json.loads(urllib.request.urlopen(req).read().decode())
+print(project, experiment)
 ```
 
 2) Lanzar simulación síncrona:
 
 ```python
 payload={
-  "experiment_id":1, "steps":80, "boundary":"absorbing",
+  "experiment_id": experiment["id"], "steps":80, "boundary":"absorbing",
   "source_kind":"lorentzian", "gamma":9.0, "sigma":10, "amplitude":1.0,
   "save_series": True, "series_stride": 10
 }
@@ -68,16 +78,25 @@ python aetherlab\apps\desktop\main.py
 ```
 
 ### Controles
-- Parámetros de simulación: fuente, boundary, steps, dt, amplitud, sigma, radius, gamma, frequency.
+- API base (por defecto `http://127.0.0.1:8000`).
+- Selector de proyecto y experimento (crear/refrescar/seleccionar).
+- Parámetros de simulación: fuente, boundary, steps, dt, amplitud, sigma, radius, gamma, frequency (según la fuente).
 - Guardar serie y stride.
 - run_id y estado con botones: Actualizar, Abortar, Reintentar (si RQ).
-- Descargas: snapshot (PNG), serie (NPZ), campo (NPY), export de métricas CSV.
- - Reproducción de series: botones “Reproducir/Parar” y control de frame actual.
+- Export unificado: Reporte HTML, métricas CSV, snapshot PNG, serie NPZ, campo NPY, ROI CSV, MP4.
+- Reproducción de series: “Reproducir/Parar” y control de frame actual.
 
 ### Visualización
 - Energía vs tiempo (desde serie NPZ).
 - Espectro radial (lineal o log).
 - Autocorrelación 2D (recorte configurable).
+
+### Pestañas adicionales
+- Datos: listar datasets, ver meta, ejecutar ETL y ver artefactos asociados.
+- IA: ejecutar IA sobre run o dataset y listar ModelRuns del experimento.
+- Comparación: run↔run y run↔dataset con métricas y figura.
+- Reportes: cargar HTML de run/experimento y guardar localmente.
+- Configuración: `GET /health` para comprobar estado del API.
 
 ### Flujo recomendado en UI
 1) Ajusta parámetros y pulsa “Simular (API)”.  
@@ -122,5 +141,7 @@ python aetherlab\apps\desktop\main.py
 - Registrar parámetros exactos y entorno (CPU/GPU, librerías).
 - Usar reportes HTML:
   - `GET /reports/run/{id}/html` y `GET /reports/experiment/{id}/html`.
+- Comparación:
+  - `GET /compare/run-run` y `GET /compare/run-dataset` (+ `.../figure.png`).
 - Limpieza de datos:
   - `POST /data/cleanup?days=30` para eliminar outputs/features antiguos.

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import base64
 import io
@@ -7,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Response
+from matplotlib.figure import Figure
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,9 +26,14 @@ from aetherlab.packages.aether_core.models_db import (
     SimulationRun,
 )
 from aetherlab.packages.aether_data.registry import get as get_dataset, list_datasets
-from aetherlab.packages.aether_data.etl import ensure_tree, process_map_to_features, process_strain_to_features
+from aetherlab.packages.aether_data.etl import (
+    ensure_tree,
+    load_array,
+    process_map_to_features,
+    process_strain_to_features,
+)
 from aetherlab.packages.aether_ai.baseline import dbscan_labels, isolation_forest_score, pca_outlier_score
-from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, power_spectrum_radial
+from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, corrcoef2d, power_spectrum_radial
 from aetherlab.packages.aether_sim.simulator2d import Simulator2D
 from aetherlab.packages.aether_sim.sources import (
     gaussian_pulse,
@@ -36,6 +43,7 @@ from aetherlab.packages.aether_sim.sources import (
     top_hat,
 )
 from aetherlab.packages.aether_viz.plots import show_field
+from aetherlab.packages.aether_report.builder import build_run_html
 
 from .db import get_session
 
@@ -826,19 +834,132 @@ class DatasetIn(BaseModel):
     description: str | None = None
 
 
+def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            b = f.read(chunk_size)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
+
+def _dataset_meta(path: Path) -> dict:
+    p = path.resolve()
+    st = p.stat()
+    return {
+        "origin_path": p.as_posix(),
+        "size_bytes": int(st.st_size),
+        "mtime_ns": int(st.st_mtime_ns),
+        "sha256": _sha256_file(p),
+    }
+
+
+def _dataset_next_version(name: str, sha256: str, db: Session) -> int:
+    rows = db.execute(select(Dataset).where(Dataset.name == name).order_by(Dataset.id.asc())).scalars().all()
+    versions: list[int] = []
+    for r in rows:
+        if not r.description:
+            continue
+        try:
+            d = json.loads(r.description)
+        except Exception:
+            continue
+        if isinstance(d, dict) and d.get("sha256") == sha256:
+            try:
+                versions.append(int(d.get("version", 1)))
+            except Exception:
+                versions.append(1)
+    return (max(versions) + 1) if versions else 1
+
+
 @app.post("/datasets")
 def create_dataset(payload: DatasetIn, db: Session = Depends(get_session)):
-    obj = Dataset(name=payload.name, path=payload.path, description=payload.description)
+    try:
+        meta = _dataset_meta(Path(payload.path))
+        meta["version"] = _dataset_next_version(payload.name, meta["sha256"], db)
+        desc = payload.description or json.dumps(meta, ensure_ascii=False)
+    except Exception:
+        desc = payload.description
+        meta = None
+    obj = Dataset(name=payload.name, path=payload.path, description=desc)
     db.add(obj)
     db.commit()
     db.refresh(obj)
-    return {"id": obj.id, "name": obj.name, "path": obj.path}
+    return {"id": obj.id, "name": obj.name, "path": obj.path, "meta": meta}
 
 
 @app.get("/datasets")
 def list_datasets_db(db: Session = Depends(get_session)):
     rows = db.execute(select(Dataset)).scalars().all()
     return [{"id": d.id, "name": d.name, "path": d.path, "description": d.description} for d in rows]
+
+
+@app.get("/datasets/{dataset_id}/meta")
+def dataset_meta(dataset_id: int, db: Session = Depends(get_session)):
+    ds = db.get(Dataset, dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    try:
+        meta = _dataset_meta(Path(ds.path))
+    except Exception:
+        meta = None
+    stored = None
+    if ds.description:
+        try:
+            stored = json.loads(ds.description)
+        except Exception:
+            stored = ds.description
+    return {"id": ds.id, "name": ds.name, "path": ds.path, "meta": meta, "stored": stored}
+
+
+class EtlDatasetRequest(BaseModel):
+    dataset_id: int
+    normalize: str | None = "zscore"
+    qc: bool = True
+
+
+@app.post("/etl/dataset")
+def etl_dataset(payload: EtlDatasetRequest, db: Session = Depends(get_session)):
+    ds = db.get(Dataset, payload.dataset_id)
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    p = Path(ds.path)
+    root = Path(__file__).resolve().parents[3]
+    try:
+        arr = load_array(p)
+        if arr.ndim == 2:
+            out = process_map_to_features(p, root, normalize=payload.normalize, qc=payload.qc)
+        else:
+            out = process_strain_to_features(p, root, normalize=payload.normalize, qc=payload.qc)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"etl failed: {e}")
+    qc_path = out.with_suffix(".qc.json")
+    qc_data = None
+    if payload.qc and qc_path.exists():
+        try:
+            qc_data = json.loads(qc_path.read_text(encoding="utf-8"))
+        except Exception:
+            qc_data = None
+    art_feat = Artifact(run_id=None, dataset_id=ds.id, kind="etl_features", path=out.as_posix())
+    db.add(art_feat)
+    db.commit()
+    db.refresh(art_feat)
+    art_qc = None
+    if payload.qc and qc_path.exists():
+        art_qc = Artifact(run_id=None, dataset_id=ds.id, kind="etl_qc", path=qc_path.as_posix())
+        db.add(art_qc)
+        db.commit()
+        db.refresh(art_qc)
+    return {
+        "dataset_id": ds.id,
+        "features_path": out.as_posix(),
+        "qc_path": qc_path.as_posix() if payload.qc else None,
+        "qc": qc_data,
+        "artifact_features_id": art_feat.id,
+        "artifact_qc_id": art_qc.id if art_qc is not None else None,
+    }
 
 
 class ModelRunIn(BaseModel):
@@ -873,9 +994,96 @@ def list_model_runs(experiment_id: int | None = None, db: Session = Depends(get_
             "experiment_id": m.experiment_id,
             "model_name": m.model_name,
             "status": m.status,
+                "metrics": json.loads(m.metrics_json) if m.metrics_json else None,
         }
         for m in rows
     ]
+
+
+@app.get("/models/{model_run_id}")
+def get_model_run(model_run_id: int, db: Session = Depends(get_session)):
+    obj = db.get(ModelRun, model_run_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="model run not found")
+    params = None
+    metrics = None
+    if obj.params_json:
+        try:
+            params = json.loads(obj.params_json)
+        except Exception:
+            params = obj.params_json
+    if obj.metrics_json:
+        try:
+            metrics = json.loads(obj.metrics_json)
+        except Exception:
+            metrics = obj.metrics_json
+    return {
+        "id": obj.id,
+        "experiment_id": obj.experiment_id,
+        "model_name": obj.model_name,
+        "status": obj.status,
+        "params": params,
+        "metrics": metrics,
+        "created_at": str(obj.created_at),
+    }
+
+
+@app.get("/artifacts")
+def list_artifacts(run_id: int | None = None, dataset_id: int | None = None, db: Session = Depends(get_session)):
+    stmt = select(Artifact).order_by(Artifact.id.desc())
+    if run_id is not None:
+        stmt = stmt.where(Artifact.run_id == run_id)
+    if dataset_id is not None:
+        stmt = stmt.where(Artifact.dataset_id == dataset_id)
+    rows = db.execute(stmt).scalars().all()
+    return [
+        {
+            "id": a.id,
+            "run_id": a.run_id,
+            "dataset_id": a.dataset_id,
+            "kind": a.kind,
+            "path": a.path,
+            "created_at": str(a.created_at),
+        }
+        for a in rows
+    ]
+
+
+@app.get("/artifacts/{artifact_id}")
+def get_artifact(artifact_id: int, db: Session = Depends(get_session)):
+    a = db.get(Artifact, artifact_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    return {
+        "id": a.id,
+        "run_id": a.run_id,
+        "dataset_id": a.dataset_id,
+        "kind": a.kind,
+        "path": a.path,
+        "created_at": str(a.created_at),
+    }
+
+
+def _safe_download_path(p: Path) -> Path:
+    root = Path(__file__).resolve().parents[3]
+    base = (root / "aetherlab" / "data").resolve()
+    pp = p.resolve()
+    try:
+        pp.relative_to(base)
+    except Exception:
+        raise HTTPException(status_code=404, detail="file not found")
+    if not pp.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+    return pp
+
+
+@app.get("/artifacts/{artifact_id}/download")
+def download_artifact(artifact_id: int, db: Session = Depends(get_session)):
+    a = db.get(Artifact, artifact_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    p = _safe_download_path(Path(a.path))
+    return FileResponse(p)
 
 
 @app.post("/experiments/{experiment_id}/datasets/link")
@@ -926,11 +1134,20 @@ def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)
     with open(out_path.as_posix(), "w", encoding="utf-8") as f:
         for v in s.tolist():
             f.write(f"{v}\n")
+    score_stats = {
+        "n": int(s.size),
+        "mean": float(np.mean(s)),
+        "std": float(np.std(s)),
+        "min": float(np.min(s)),
+        "max": float(np.max(s)),
+        "path": out_path.as_posix(),
+    }
     mr = ModelRun(
         experiment_id=obj.experiment_id,
         model_name=payload.method,
         params_json=json.dumps({}),
         status="finished",
+        metrics_json=json.dumps(score_stats),
     )
     db.add(mr)
     db.commit()
@@ -944,6 +1161,8 @@ def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)
 class AiRunOnDatasetRequest(BaseModel):
     dataset_id: int
     method: str = "isoforest"
+    normalize: str | None = "zscore"
+    qc: bool = True
 
 
 @app.post("/ai/run-on-dataset")
@@ -954,17 +1173,16 @@ def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_
     p = Path(ds.path)
     root = Path(__file__).resolve().parents[3]
     try:
-        # Attempt ETL to features
-        if p.suffix in (".npy", ".npz"):
-            features = process_map_to_features(p, root)
-            z = np.load(features.as_posix())
-            X = z["features"].reshape(-1, 1)
+        arr = load_array(p)
+        if arr.ndim == 2:
+            features = process_map_to_features(p, root, normalize=payload.normalize, qc=payload.qc)
         else:
-            features = process_strain_to_features(p, root)
-            z = np.load(features.as_posix())
-            X = z["features"].reshape(-1, 1)
-    except Exception:
-        raise HTTPException(status_code=500, detail="etl failed")
+            features = process_strain_to_features(p, root, normalize=payload.normalize, qc=payload.qc)
+        z = np.load(features.as_posix())
+        X = z["features"].reshape(-1, 1)
+        qc_path = features.with_suffix(".qc.json")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"etl failed: {e}")
     if payload.method == "isoforest":
         s = isolation_forest_score(X)
     elif payload.method == "mean_dist":
@@ -977,31 +1195,60 @@ def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_
     with open(out_path.as_posix(), "w", encoding="utf-8") as f:
         for v in s.tolist():
             f.write(f"{v}\n")
+    score_stats = {
+        "n": int(s.size),
+        "mean": float(np.mean(s)),
+        "std": float(np.std(s)),
+        "min": float(np.min(s)),
+        "max": float(np.max(s)),
+        "path": out_path.as_posix(),
+        "features_path": features.as_posix(),
+        "qc_path": qc_path.as_posix() if payload.qc else None,
+    }
     link = db.execute(select(ExperimentDataset).where(ExperimentDataset.dataset_id == ds.id)).scalars().first()
     if link is not None:
         mr = ModelRun(
             experiment_id=link.experiment_id,
             model_name=payload.method,
-            params_json=json.dumps({"dataset_id": ds.id}),
+            params_json=json.dumps({"dataset_id": ds.id, "normalize": payload.normalize}),
             status="finished",
+            metrics_json=json.dumps(score_stats),
         )
         db.add(mr)
         db.commit()
         db.refresh(mr)
+        art_feat = Artifact(run_id=None, dataset_id=ds.id, kind="etl_features", path=features.as_posix())
+        db.add(art_feat)
+        db.commit()
+        db.refresh(art_feat)
+        art_qc = None
+        if payload.qc and qc_path.exists():
+            art_qc = Artifact(run_id=None, dataset_id=ds.id, kind="etl_qc", path=qc_path.as_posix())
+            db.add(art_qc)
+            db.commit()
+            db.refresh(art_qc)
         art = Artifact(run_id=None, dataset_id=ds.id, kind="ai_scores", path=out_path.as_posix())
         db.add(art)
         db.commit()
-        return {"path": out_path.as_posix(), "model_run_id": mr.id, "artifact_path": art.path}
-    return {"path": out_path.as_posix()}
+        return {
+            "path": out_path.as_posix(),
+            "features_path": features.as_posix(),
+            "qc_path": qc_path.as_posix() if payload.qc else None,
+            "model_run_id": mr.id,
+            "artifact_path": art.path,
+            "artifact_features_id": art_feat.id,
+            "artifact_qc_id": art_qc.id if art_qc is not None else None,
+        }
+    return {
+        "path": out_path.as_posix(),
+        "features_path": features.as_posix(),
+        "qc_path": qc_path.as_posix() if payload.qc else None,
+    }
 
 
 @app.get("/ai/download")
 def ai_download(path: str):
-    p = Path(path)
-    root = Path(__file__).resolve().parents[3]
-    base = root / "aetherlab" / "data"
-    if not p.exists() or not p.as_posix().startswith(base.as_posix()):
-        raise HTTPException(status_code=404, detail="file not found")
+    p = _safe_download_path(Path(path))
     return FileResponse(p)
 
 
@@ -1025,36 +1272,22 @@ def report_run_html(run_id: int, crop: int = Query(default=64, ge=8, le=512), db
     c1 = w // 2
     half = min(crop // 2, c0, c1)
     cut = ac[c0 - half : c0 + half, c1 - half : c1 + half]
-    import matplotlib.pyplot as plt  # noqa: WPS433
-    figS = plt.Figure(figsize=(5, 3), dpi=120)
-    axS = figS.add_subplot(111)
-    axS.plot(k, ps, label="Espectro radial")
-    axS.set_xlabel("k")
-    axS.set_ylabel("potencia")
-    axS.grid(True)
-    axS.legend()
-    bufS = io.BytesIO()
-    figS.savefig(bufS, format="png", bbox_inches="tight")
-    figA = plt.Figure(figsize=(4, 4), dpi=120)
-    axA = figA.add_subplot(111)
-    im = axA.imshow(cut, cmap="viridis", origin="lower")
-    figA.colorbar(im, ax=axA, fraction=0.046, pad=0.04)
-    bufA = io.BytesIO()
-    figA.savefig(bufA, format="png", bbox_inches="tight")
-    snap_b64 = "data:image/png;base64," + base64.b64encode(snap_b).decode()
-    spec_b64 = "data:image/png;base64," + base64.b64encode(bufS.getvalue()).decode()
-    auto_b64 = "data:image/png;base64," + base64.b64encode(bufA.getvalue()).decode()
-    html = (
-        "<!doctype html><html lang='es'><head><meta charset='utf-8'>"
-        f"<title>Reporte Run {run_id}</title>"
-        "<style>body{font-family:Arial;margin:20px}.grid{display:grid;"
-        "grid-template-columns:repeat(2,1fr);gap:20px}.card{border:1px solid #ccc;"
-        "padding:12px;border-radius:8px}img{max-width:100%}</style></head><body>"
-        f"<h1>Reporte de Run {run_id}</h1><div class='grid'>"
-        f"<div class='card'><h2>Snapshot</h2><img src='{snap_b64}'/></div>"
-        f"<div class='card'><h2>Espectro radial</h2><img src='{spec_b64}'/></div>"
-        f"<div class='card'><h2>Autocorrelación 2D</h2><img src='{auto_b64}'/></div>"
-        "</div></body></html>"
+    series_metrics = None
+    npz = snap.with_suffix(".npz")
+    if npz.exists():
+        try:
+            z = np.load(npz.as_posix())
+            frames = z["frames"]
+            series_metrics = [compute_metrics(fr) for fr in frames]
+        except Exception:
+            series_metrics = None
+    html = build_run_html(
+        run_id,
+        snapshot_png=snap_b,
+        spectrum=(k, ps),
+        autocorr=cut,
+        series_metrics=series_metrics,
+        title=f"Reporte Run {run_id}",
     )
     return Response(content=html, media_type="text/html")
 
@@ -1074,7 +1307,7 @@ def report_experiment_html(exp_id: int, db: Session = Depends(get_session)):
             continue
         snap_b64 = "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
         arts = db.execute(select(Artifact).where(Artifact.run_id == r.id)).scalars().all()
-        links = "".join([f"<li><a href='/ai/download?path={a.path}'>{a.kind}</a></li>" for a in arts])
+        links = "".join([f"<li><a href='/artifacts/{a.id}/download'>{a.kind}</a></li>" for a in arts])
         try:
             u = _load_field_for_run(r)
             m = float(np.mean(u))
@@ -1107,6 +1340,164 @@ def report_experiment_html(exp_id: int, db: Session = Depends(get_session)):
         "</body></html>"
     )
     return Response(content=html, media_type="text/html")
+
+
+def _as_2d(arr: np.ndarray) -> np.ndarray:
+    a = np.asarray(arr)
+    if a.ndim == 2:
+        return a.astype(np.float32)
+    raise ValueError("expected 2D array")
+
+
+def _align_2d(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    a2 = _as_2d(a)
+    b2 = _as_2d(b)
+    ha, wa = a2.shape
+    hb, wb = b2.shape
+    h = min(ha, hb)
+    w = min(wa, wb)
+    a0 = a2[(ha - h) // 2 : (ha - h) // 2 + h, (wa - w) // 2 : (wa - w) // 2 + w]
+    b0 = b2[(hb - h) // 2 : (hb - h) // 2 + h, (wb - w) // 2 : (wb - w) // 2 + w]
+    return a0, b0
+
+
+def _compare_fields(a: np.ndarray, b: np.ndarray) -> dict:
+    a0, b0 = _align_2d(a, b)
+    d = a0 - b0
+    mse = float(np.mean(d**2))
+    mae = float(np.mean(np.abs(d)))
+    corr = float(corrcoef2d(a0, b0))
+    k1, ps1 = power_spectrum_radial(a0)
+    k2, ps2 = power_spectrum_radial(b0)
+    n = int(min(len(ps1), len(ps2)))
+    if n > 0:
+        p1 = ps1[:n] / (float(np.sum(ps1[:n])) + 1e-12)
+        p2 = ps2[:n] / (float(np.sum(ps2[:n])) + 1e-12)
+        ps_l2 = float(np.linalg.norm(p1 - p2))
+    else:
+        ps_l2 = float("nan")
+    return {
+        "shape_a": list(a0.shape),
+        "shape_b": list(b0.shape),
+        "mse": mse,
+        "mae": mae,
+        "corr": corr,
+        "spectrum_l2": ps_l2,
+        "a_stats": {"mean": float(np.mean(a0)), "std": float(np.std(a0))},
+        "b_stats": {"mean": float(np.mean(b0)), "std": float(np.std(b0))},
+    }
+
+
+def _compare_figure_png(a: np.ndarray, b: np.ndarray, title: str) -> bytes:
+    a0, b0 = _align_2d(a, b)
+    d = a0 - b0
+    fig = Figure(figsize=(10, 3.6), dpi=140)
+    ax1 = fig.add_subplot(1, 3, 1)
+    ax2 = fig.add_subplot(1, 3, 2)
+    ax3 = fig.add_subplot(1, 3, 3)
+    ax1.set_title("A")
+    ax2.set_title("B")
+    ax3.set_title("A-B")
+    im1 = ax1.imshow(a0, cmap="viridis", origin="lower")
+    im2 = ax2.imshow(b0, cmap="viridis", origin="lower")
+    im3 = ax3.imshow(d, cmap="coolwarm", origin="lower")
+    for ax in (ax1, ax2, ax3):
+        ax.set_xticks([])
+        ax.set_yticks([])
+    fig.suptitle(title)
+    fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+    fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+    fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    return buf.getvalue()
+
+
+def _safe_data_path(p: Path) -> Path:
+    root = Path(__file__).resolve().parents[3]
+    base = root / "aetherlab" / "data"
+    pp = p.resolve()
+    if not pp.exists() or not pp.as_posix().startswith(base.resolve().as_posix()):
+        raise HTTPException(status_code=404, detail="file not found")
+    return pp
+
+
+def _load_dataset_array(path: Path) -> np.ndarray:
+    if path.suffix == ".npy":
+        return np.load(path.as_posix())
+    if path.suffix == ".npz":
+        z = np.load(path.as_posix())
+        key = "map" if "map" in z.files else z.files[0]
+        return z[key]
+    if path.suffix == ".csv":
+        import pandas as pd  # noqa: WPS433
+
+        df = pd.read_csv(path.as_posix())
+        num = df.select_dtypes(include=["number"])
+        return num.to_numpy()
+    if path.suffix == ".parquet":
+        import pandas as pd  # noqa: WPS433
+
+        df = pd.read_parquet(path.as_posix())
+        num = df.select_dtypes(include=["number"])
+        return num.to_numpy()
+    import h5py  # noqa: WPS433
+
+    with h5py.File(path.as_posix(), "r") as f:
+        key = "map" if "map" in f.keys() else list(f.keys())[0]
+        return np.asarray(f[key][()])
+
+
+@app.get("/compare/run-run")
+def compare_run_run(run_a: int, run_b: int, db: Session = Depends(get_session)):
+    a = db.get(SimulationRun, run_a)
+    b = db.get(SimulationRun, run_b)
+    if a is None or b is None or not a.snapshot_path or not b.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    ua = _load_field_for_run(a)
+    ub = _load_field_for_run(b)
+    return {"run_a": run_a, "run_b": run_b, "metrics": _compare_fields(ua, ub)}
+
+
+@app.get("/compare/run-run/figure.png")
+def compare_run_run_figure(run_a: int, run_b: int, db: Session = Depends(get_session)):
+    a = db.get(SimulationRun, run_a)
+    b = db.get(SimulationRun, run_b)
+    if a is None or b is None or not a.snapshot_path or not b.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    ua = _load_field_for_run(a)
+    ub = _load_field_for_run(b)
+    png = _compare_figure_png(ua, ub, title=f"Run {run_a} vs Run {run_b}")
+    return Response(content=png, media_type="image/png")
+
+
+@app.get("/compare/run-dataset")
+def compare_run_dataset(run_id: int, dataset_id: int, db: Session = Depends(get_session)):
+    r = db.get(SimulationRun, run_id)
+    ds = db.get(Dataset, dataset_id)
+    if r is None or not r.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    ua = _load_field_for_run(r)
+    p = _safe_data_path(Path(ds.path))
+    arr = _load_dataset_array(p)
+    return {"run_id": run_id, "dataset_id": dataset_id, "metrics": _compare_fields(ua, arr)}
+
+
+@app.get("/compare/run-dataset/figure.png")
+def compare_run_dataset_figure(run_id: int, dataset_id: int, db: Session = Depends(get_session)):
+    r = db.get(SimulationRun, run_id)
+    ds = db.get(Dataset, dataset_id)
+    if r is None or not r.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    if ds is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    ua = _load_field_for_run(r)
+    p = _safe_data_path(Path(ds.path))
+    arr = _load_dataset_array(p)
+    png = _compare_figure_png(ua, arr, title=f"Run {run_id} vs Dataset {dataset_id}")
+    return Response(content=png, media_type="image/png")
 
 @app.post("/data/cleanup")
 def data_cleanup(days: int = 30):

@@ -1,4 +1,3 @@
-import base64
 import csv
 import io
 import json
@@ -19,12 +18,15 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSpinBox,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -96,6 +98,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("AETHERLAB")
         self.resize(1024, 720)
+        self.base_url = QLineEdit("http://127.0.0.1:8000")
+        self.project_cb = QComboBox()
+        self.experiment_cb = QComboBox()
+        btn_projects_refresh = QPushButton("Refrescar proyectos")
+        btn_projects_new = QPushButton("Nuevo proyecto")
+        btn_experiments_refresh = QPushButton("Refrescar experimentos")
+        btn_experiments_new = QPushButton("Nuevo experimento")
         self.label = RoiLabel()
         self.label.setText("Sin snapshot")
         self.label.setMinimumSize(640, 480)
@@ -195,36 +204,87 @@ class MainWindow(QMainWindow):
         self.roi_y0.valueChanged.connect(self.update_roi_dynamic)
         self.roi_w.valueChanged.connect(self.update_roi_dynamic)
         self.roi_h.valueChanged.connect(self.update_roi_dynamic)
-        layout = QVBoxLayout()
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Fuente"))
-        controls.addWidget(self.source)
-        controls.addWidget(QLabel("Boundary"))
-        controls.addWidget(self.boundary)
-        controls.addWidget(QLabel("steps"))
-        controls.addWidget(self.steps)
-        controls.addWidget(QLabel("dt"))
-        controls.addWidget(self.dt)
-        controls.addWidget(QLabel("amp"))
-        controls.addWidget(self.amp)
-        controls.addWidget(QLabel("sigma"))
-        controls.addWidget(self.sigma)
-        controls.addWidget(QLabel("radius"))
-        controls.addWidget(self.radius)
-        controls.addWidget(QLabel("gamma"))
-        controls.addWidget(self.gamma)
-        controls.addWidget(QLabel("freq"))
-        controls.addWidget(self.freq)
-        controls.addWidget(self.save_series)
-        controls.addWidget(QLabel("stride"))
-        controls.addWidget(self.series_stride)
-        layout.addLayout(controls)
-        buttons = QHBoxLayout()
-        buttons.addWidget(btn_load)
-        buttons.addWidget(btn_sim)
-        layout.addLayout(buttons)
-        layout.addWidget(self.label)
-        # Tabs with plots
+        left = QVBoxLayout()
+        left.addWidget(QLabel("API base"))
+        left.addWidget(self.base_url)
+        rowp = QHBoxLayout()
+        rowp.addWidget(QLabel("Proyecto"))
+        rowp.addWidget(self.project_cb)
+        left.addLayout(rowp)
+        rowp2 = QHBoxLayout()
+        rowp2.addWidget(btn_projects_refresh)
+        rowp2.addWidget(btn_projects_new)
+        left.addLayout(rowp2)
+        rowe = QHBoxLayout()
+        rowe.addWidget(QLabel("Experimento"))
+        rowe.addWidget(self.experiment_cb)
+        left.addLayout(rowe)
+        rowe2 = QHBoxLayout()
+        rowe2.addWidget(btn_experiments_refresh)
+        rowe2.addWidget(btn_experiments_new)
+        left.addLayout(rowe2)
+        left.addWidget(QLabel("Parámetros de simulación"))
+        s1 = QHBoxLayout()
+        s1.addWidget(QLabel("Fuente"))
+        s1.addWidget(self.source)
+        s1.addWidget(QLabel("Boundary"))
+        s1.addWidget(self.boundary)
+        left.addLayout(s1)
+        s2 = QHBoxLayout()
+        s2.addWidget(QLabel("steps"))
+        s2.addWidget(self.steps)
+        s2.addWidget(QLabel("dt"))
+        s2.addWidget(self.dt)
+        left.addLayout(s2)
+        s3 = QHBoxLayout()
+        s3.addWidget(QLabel("amp"))
+        s3.addWidget(self.amp)
+        s3.addWidget(QLabel("sigma"))
+        s3.addWidget(self.sigma)
+        left.addLayout(s3)
+        s4 = QHBoxLayout()
+        s4.addWidget(QLabel("radius"))
+        s4.addWidget(self.radius)
+        s4.addWidget(QLabel("gamma"))
+        s4.addWidget(self.gamma)
+        left.addLayout(s4)
+        s5 = QHBoxLayout()
+        s5.addWidget(QLabel("freq"))
+        s5.addWidget(self.freq)
+        left.addLayout(s5)
+        s6 = QHBoxLayout()
+        s6.addWidget(self.save_series)
+        s6.addWidget(QLabel("stride"))
+        s6.addWidget(self.series_stride)
+        left.addLayout(s6)
+        sb = QHBoxLayout()
+        sb.addWidget(btn_sim)
+        sb.addWidget(btn_load)
+        left.addLayout(sb)
+        self.export_kind = QComboBox()
+        self.export_kind.addItems(
+            [
+                "Reporte HTML",
+                "Métricas CSV",
+                "Snapshot PNG",
+                "Serie NPZ",
+                "Campo NPY",
+                "ROI CSV",
+                "MP4",
+            ]
+        )
+        btn_export = QPushButton("Exportar…")
+        btn_export.clicked.connect(self.export_unified)
+        er = QHBoxLayout()
+        er.addWidget(self.export_kind)
+        er.addWidget(btn_export)
+        left.addLayout(er)
+        left.addStretch(1)
+        left_w = QWidget()
+        left_w.setLayout(left)
+
+        right = QVBoxLayout()
+        right.addWidget(self.label)
         self.tabs = QTabWidget()
         # Energy
         self.fig = Figure(figsize=(5, 2.5), dpi=100)
@@ -250,6 +310,16 @@ class MainWindow(QMainWindow):
         l3.addWidget(self.canvas3)
         w3.setLayout(l3)
         self.tabs.addTab(w3, "Autocorr")
+        self.data_tab = QWidget()
+        self.ai_tab = QWidget()
+        self.compare_tab = QWidget()
+        self.reports_tab = QWidget()
+        self.config_tab = QWidget()
+        self.tabs.addTab(self.data_tab, "Datos")
+        self.tabs.addTab(self.ai_tab, "IA")
+        self.tabs.addTab(self.compare_tab, "Comparación")
+        self.tabs.addTab(self.reports_tab, "Reportes")
+        self.tabs.addTab(self.config_tab, "Configuración")
         controls2 = QHBoxLayout()
         controls2.addWidget(QLabel("run_id"))
         controls2.addWidget(self.run_id)
@@ -278,27 +348,441 @@ class MainWindow(QMainWindow):
         controls3.addWidget(self.frame_idx)
         controls3.addWidget(btn_play)
         controls3.addWidget(btn_stop)
-        controls3.addWidget(btn_download)
-        controls3.addWidget(btn_download_series)
-        controls3.addWidget(btn_download_field)
-        controls3.addWidget(btn_export_csv)
-        controls3.addWidget(btn_export_html)
         controls3.addWidget(btn_roi_csv)
-        controls3.addWidget(btn_export_mp4)
-        layout.addLayout(controls2)
-        layout.addLayout(controls3)
-        layout.addWidget(self.tabs)
+        right.addLayout(controls2)
+        right.addLayout(controls3)
+        right.addWidget(self.tabs)
+        right_w = QWidget()
+        right_w.setLayout(right)
+
+        main = QHBoxLayout()
+        main.addWidget(left_w, 1)
+        main.addWidget(right_w, 4)
         c = QWidget()
-        c.setLayout(layout)
+        c.setLayout(main)
         self.setCentralWidget(c)
         def _on_roi_change(x0, y0, w, h):
-            # Actualizar spinboxes de ROI
             self.roi_x0.setValue(x0)
             self.roi_y0.setValue(y0)
             self.roi_w.setValue(max(1, w))
             self.roi_h.setValue(max(1, h))
         self.label.on_roi_change = _on_roi_change
+        btn_projects_refresh.clicked.connect(self.refresh_projects)
+        btn_projects_new.clicked.connect(self.create_project_ui)
+        btn_experiments_refresh.clicked.connect(self.refresh_experiments)
+        btn_experiments_new.clicked.connect(self.create_experiment_ui)
+        self.project_cb.currentIndexChanged.connect(self.refresh_experiments)
+        self.init_data_tab()
+        self.init_ai_tab()
+        self.init_compare_tab()
+        self.init_reports_tab()
+        self.init_config_tab()
+        self.refresh_projects()
         self.load_last()
+
+    def api_base(self) -> str:
+        return self.base_url.text().strip().rstrip("/")
+
+    def http_get(self, path: str, timeout: int = 15) -> bytes:
+        url = self.api_base() + path
+        return urllib.request.urlopen(url, timeout=timeout).read()
+
+    def http_get_text(self, path: str, timeout: int = 15) -> str:
+        return self.http_get(path, timeout=timeout).decode()
+
+    def http_post_json(self, path: str, payload: dict, timeout: int = 15) -> dict:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            self.api_base() + path,
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode())
+
+    def http_post_empty(self, path: str, timeout: int = 15) -> dict:
+        req = urllib.request.Request(self.api_base() + path, data=b"", method="POST")
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode())
+
+    def current_project_id(self) -> int | None:
+        v = self.project_cb.currentData()
+        return int(v) if v is not None else None
+
+    def current_experiment_id(self) -> int | None:
+        v = self.experiment_cb.currentData()
+        return int(v) if v is not None else None
+
+    def refresh_projects(self):
+        try:
+            rows = json.loads(self.http_get_text("/projects", timeout=10))
+            self.project_cb.blockSignals(True)
+            self.project_cb.clear()
+            for r in rows:
+                self.project_cb.addItem(f"{r['id']}: {r['name']}", r["id"])
+            self.project_cb.blockSignals(False)
+            self.refresh_experiments()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def refresh_experiments(self):
+        try:
+            pid = self.current_project_id()
+            if pid is None:
+                self.experiment_cb.clear()
+                return
+            rows = json.loads(self.http_get_text(f"/experiments?project_id={pid}", timeout=10))
+            self.experiment_cb.clear()
+            for r in rows:
+                self.experiment_cb.addItem(f"{r['id']}: {r['name']}", r["id"])
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def create_project_ui(self):
+        name, ok = QInputDialog.getText(self, "Nuevo proyecto", "Nombre del proyecto")
+        if not ok or not name.strip():
+            return
+        desc, ok2 = QInputDialog.getText(self, "Nuevo proyecto", "Descripción (opcional)")
+        if not ok2:
+            desc = ""
+        try:
+            _ = self.http_post_json(
+                "/projects",
+                {"name": name.strip(), "description": desc.strip() or None},
+                timeout=15,
+            )
+            self.refresh_projects()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def create_experiment_ui(self):
+        pid = self.current_project_id()
+        if pid is None:
+            QMessageBox.information(self, "Experimentos", "Selecciona o crea un proyecto primero")
+            return
+        name, ok = QInputDialog.getText(self, "Nuevo experimento", "Nombre del experimento")
+        if not ok or not name.strip():
+            return
+        try:
+            _ = self.http_post_json("/experiments", {"project_id": pid, "name": name.strip()}, timeout=15)
+            self.refresh_experiments()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+
+    def export_unified(self):
+        k = self.export_kind.currentText()
+        if k == "Reporte HTML":
+            self.export_report_html()
+            return
+        if k == "Métricas CSV":
+            self.export_series_metrics_csv()
+            return
+        if k == "Snapshot PNG":
+            self.download_snapshot()
+            return
+        if k == "Serie NPZ":
+            self.download_series()
+            return
+        if k == "Campo NPY":
+            self.download_field()
+            return
+        if k == "ROI CSV":
+            self.export_roi_csv()
+            return
+        if k == "MP4":
+            self.export_mp4()
+            return
+
+    def init_data_tab(self):
+        self.data_ds_cb = QComboBox()
+        self.data_norm_cb = QComboBox()
+        self.data_norm_cb.addItems(["zscore", "minmax", "robust", "none"])
+        self.data_qc = QCheckBox("QC")
+        self.data_qc.setChecked(True)
+        self.data_out = QTextEdit()
+        self.data_out.setReadOnly(True)
+        btn_ds_refresh = QPushButton("Refrescar datasets")
+        btn_ds_meta = QPushButton("Meta")
+        btn_ds_etl = QPushButton("ETL")
+        btn_ds_artifacts = QPushButton("Artefactos")
+        btn_ds_refresh.clicked.connect(self.data_refresh_datasets)
+        btn_ds_meta.clicked.connect(self.data_show_meta)
+        btn_ds_etl.clicked.connect(self.data_run_etl)
+        btn_ds_artifacts.clicked.connect(self.data_list_artifacts)
+        top = QHBoxLayout()
+        top.addWidget(self.data_ds_cb)
+        top.addWidget(btn_ds_refresh)
+        top2 = QHBoxLayout()
+        top2.addWidget(QLabel("Normalize"))
+        top2.addWidget(self.data_norm_cb)
+        top2.addWidget(self.data_qc)
+        top2.addWidget(btn_ds_meta)
+        top2.addWidget(btn_ds_etl)
+        top2.addWidget(btn_ds_artifacts)
+        lay = QVBoxLayout()
+        lay.addLayout(top)
+        lay.addLayout(top2)
+        lay.addWidget(self.data_out)
+        self.data_tab.setLayout(lay)
+        self.data_refresh_datasets()
+
+    def data_refresh_datasets(self):
+        try:
+            rows = json.loads(self.http_get_text("/datasets", timeout=10))
+            self.data_ds_cb.clear()
+            for d in rows:
+                self.data_ds_cb.addItem(f"{d['id']}: {d['name']}", d["id"])
+        except Exception as e:
+            self.data_out.setPlainText(str(e))
+
+    def data_current_dataset_id(self) -> int | None:
+        v = self.data_ds_cb.currentData()
+        return int(v) if v is not None else None
+
+    def data_show_meta(self):
+        did = self.data_current_dataset_id()
+        if did is None:
+            return
+        try:
+            o = json.loads(self.http_get_text(f"/datasets/{did}/meta", timeout=20))
+            self.data_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.data_out.setPlainText(str(e))
+
+    def data_run_etl(self):
+        did = self.data_current_dataset_id()
+        if did is None:
+            return
+        try:
+            o = self.http_post_json(
+                "/etl/dataset",
+                {"dataset_id": did, "normalize": self.data_norm_cb.currentText(), "qc": self.data_qc.isChecked()},
+                timeout=40,
+            )
+            self.data_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.data_out.setPlainText(str(e))
+
+    def data_list_artifacts(self):
+        did = self.data_current_dataset_id()
+        if did is None:
+            return
+        try:
+            o = json.loads(self.http_get_text(f"/artifacts?dataset_id={did}", timeout=20))
+            self.data_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.data_out.setPlainText(str(e))
+
+    def init_ai_tab(self):
+        self.ai_method = QComboBox()
+        self.ai_method.addItems(["isoforest", "mean_dist"])
+        self.ai_out = QTextEdit()
+        self.ai_out.setReadOnly(True)
+        btn_ai_run_run = QPushButton("IA sobre run")
+        btn_ai_run_ds = QPushButton("IA sobre dataset")
+        btn_ai_models = QPushButton("ModelRuns")
+        btn_ai_run_run.clicked.connect(self.ai_run_on_run)
+        btn_ai_run_ds.clicked.connect(self.ai_run_on_dataset)
+        btn_ai_models.clicked.connect(self.ai_list_models)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Método"))
+        row.addWidget(self.ai_method)
+        row.addWidget(btn_ai_run_run)
+        row.addWidget(btn_ai_run_ds)
+        row.addWidget(btn_ai_models)
+        lay = QVBoxLayout()
+        lay.addLayout(row)
+        lay.addWidget(self.ai_out)
+        self.ai_tab.setLayout(lay)
+
+    def ai_run_on_run(self):
+        try:
+            run_id = int(self.run_id.value())
+            o = self.http_post_json(
+                "/ai/run-on-run",
+                {"run_id": run_id, "method": self.ai_method.currentText()},
+                timeout=40,
+            )
+            self.ai_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.ai_out.setPlainText(str(e))
+
+    def ai_run_on_dataset(self):
+        did, ok = QInputDialog.getInt(self, "IA sobre dataset", "dataset_id", 1, 1, 1000000, 1)
+        if not ok:
+            return
+        try:
+            o = self.http_post_json(
+                "/ai/run-on-dataset",
+                {"dataset_id": did, "method": self.ai_method.currentText()},
+                timeout=60,
+            )
+            self.ai_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.ai_out.setPlainText(str(e))
+
+    def ai_list_models(self):
+        try:
+            eid = self.current_experiment_id()
+            if eid is None:
+                self.ai_out.setPlainText("Selecciona un experimento")
+                return
+            o = json.loads(self.http_get_text(f"/models?experiment_id={eid}", timeout=20))
+            self.ai_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.ai_out.setPlainText(str(e))
+
+    def init_compare_tab(self):
+        self.cmp_run_a = QSpinBox()
+        self.cmp_run_a.setRange(1, 1000000)
+        self.cmp_run_b = QSpinBox()
+        self.cmp_run_b.setRange(1, 1000000)
+        self.cmp_ds_id = QSpinBox()
+        self.cmp_ds_id.setRange(1, 1000000)
+        self.cmp_out = QTextEdit()
+        self.cmp_out.setReadOnly(True)
+        self.cmp_img = QLabel()
+        self.cmp_img.setMinimumHeight(240)
+        self.cmp_img.setScaledContents(True)
+        btn_rr = QPushButton("Run↔Run")
+        btn_rd = QPushButton("Run↔Dataset")
+        btn_rr_fig = QPushButton("Figura Run↔Run")
+        btn_rd_fig = QPushButton("Figura Run↔Dataset")
+        btn_rr.clicked.connect(self.compare_run_run)
+        btn_rd.clicked.connect(self.compare_run_dataset)
+        btn_rr_fig.clicked.connect(self.compare_run_run_fig)
+        btn_rd_fig.clicked.connect(self.compare_run_dataset_fig)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("run_a"))
+        row.addWidget(self.cmp_run_a)
+        row.addWidget(QLabel("run_b"))
+        row.addWidget(self.cmp_run_b)
+        row.addWidget(btn_rr)
+        row.addWidget(btn_rr_fig)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("dataset_id"))
+        row2.addWidget(self.cmp_ds_id)
+        row2.addWidget(btn_rd)
+        row2.addWidget(btn_rd_fig)
+        lay = QVBoxLayout()
+        lay.addLayout(row)
+        lay.addLayout(row2)
+        lay.addWidget(self.cmp_img)
+        lay.addWidget(self.cmp_out)
+        self.compare_tab.setLayout(lay)
+
+    def compare_run_run(self):
+        try:
+            a = int(self.cmp_run_a.value())
+            b = int(self.cmp_run_b.value())
+            o = json.loads(self.http_get_text(f"/compare/run-run?run_a={a}&run_b={b}", timeout=30))
+            self.cmp_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.cmp_out.setPlainText(str(e))
+
+    def compare_run_dataset(self):
+        try:
+            run_id = int(self.run_id.value())
+            did = int(self.cmp_ds_id.value())
+            o = json.loads(self.http_get_text(f"/compare/run-dataset?run_id={run_id}&dataset_id={did}", timeout=30))
+            self.cmp_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.cmp_out.setPlainText(str(e))
+
+    def compare_run_run_fig(self):
+        try:
+            a = int(self.cmp_run_a.value())
+            b = int(self.cmp_run_b.value())
+            png = self.http_get(f"/compare/run-run/figure.png?run_a={a}&run_b={b}", timeout=40)
+            pix = QPixmap()
+            pix.loadFromData(png)
+            self.cmp_img.setPixmap(pix)
+        except Exception as e:
+            self.cmp_out.setPlainText(str(e))
+
+    def compare_run_dataset_fig(self):
+        try:
+            run_id = int(self.run_id.value())
+            did = int(self.cmp_ds_id.value())
+            png = self.http_get(
+                f"/compare/run-dataset/figure.png?run_id={run_id}&dataset_id={did}",
+                timeout=40,
+            )
+            pix = QPixmap()
+            pix.loadFromData(png)
+            self.cmp_img.setPixmap(pix)
+        except Exception as e:
+            self.cmp_out.setPlainText(str(e))
+
+    def init_reports_tab(self):
+        self.rep_run_id = QSpinBox()
+        self.rep_run_id.setRange(1, 1000000)
+        self.rep_exp_id = QSpinBox()
+        self.rep_exp_id.setRange(1, 1000000)
+        self.rep_html = QTextEdit()
+        self.rep_html.setReadOnly(True)
+        btn_run = QPushButton("Cargar Run HTML")
+        btn_exp = QPushButton("Cargar Exp HTML")
+        btn_save = QPushButton("Guardar HTML…")
+        btn_run.clicked.connect(self.reports_load_run)
+        btn_exp.clicked.connect(self.reports_load_experiment)
+        btn_save.clicked.connect(self.reports_save_html)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("run_id"))
+        row.addWidget(self.rep_run_id)
+        row.addWidget(btn_run)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("exp_id"))
+        row2.addWidget(self.rep_exp_id)
+        row2.addWidget(btn_exp)
+        row2.addWidget(btn_save)
+        lay = QVBoxLayout()
+        lay.addLayout(row)
+        lay.addLayout(row2)
+        lay.addWidget(self.rep_html)
+        self.reports_tab.setLayout(lay)
+        self.rep_run_id.setValue(int(self.run_id.value()))
+
+    def reports_load_run(self):
+        rid = int(self.rep_run_id.value())
+        crop = int(self.crop.value())
+        try:
+            html = self.http_get_text(f"/reports/run/{rid}/html?crop={crop}", timeout=40)
+            self.rep_html.setPlainText(html)
+        except Exception as e:
+            self.rep_html.setPlainText(str(e))
+
+    def reports_load_experiment(self):
+        eid = int(self.rep_exp_id.value())
+        try:
+            html = self.http_get_text(f"/reports/experiment/{eid}/html", timeout=40)
+            self.rep_html.setPlainText(html)
+        except Exception as e:
+            self.rep_html.setPlainText(str(e))
+
+    def reports_save_html(self):
+        html = self.rep_html.toPlainText()
+        if not html.strip():
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Guardar HTML", "report.html", "HTML (*.html)")
+        if not path:
+            return
+        Path(path).write_text(html, encoding="utf-8")
+
+    def init_config_tab(self):
+        self.cfg_out = QTextEdit()
+        self.cfg_out.setReadOnly(True)
+        btn = QPushButton("Estado")
+        btn.clicked.connect(self.config_status)
+        lay = QVBoxLayout()
+        lay.addWidget(btn)
+        lay.addWidget(self.cfg_out)
+        self.config_tab.setLayout(lay)
+
+    def config_status(self):
+        try:
+            o = json.loads(self.http_get_text("/health", timeout=5))
+            self.cfg_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.cfg_out.setPlainText(str(e))
 
     def load_last(self):
         p = latest_snapshot()
@@ -313,28 +797,31 @@ class MainWindow(QMainWindow):
 
     def simulate_demo(self):
         try:
-            base = "http://127.0.0.1:8000"
+            eid = self.current_experiment_id()
+            if eid is None:
+                QMessageBox.information(self, "Simulación", "Selecciona o crea un experimento primero")
+                return
+            source = self.source.currentText()
             payload = {
-                "experiment_id": 1,
+                "experiment_id": eid,
                 "steps": int(self.steps.value()),
                 "dt": float(self.dt.value()),
                 "boundary": self.boundary.currentText(),
-                "source_kind": self.source.currentText(),
+                "source_kind": source,
                 "sigma": float(self.sigma.value()),
                 "radius": float(self.radius.value()),
                 "gamma": float(self.gamma.value()),
                 "amplitude": float(self.amp.value()),
-                "frequency": float(self.freq.value()),
+                "frequency": float(self.freq.value()) if source == "periodic" else None,
                 "save_series": bool(self.save_series.isChecked()),
                 "series_stride": int(self.series_stride.value()),
             }
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(
-                base + "/simulate/simple", data=data, headers={"Content-Type": "application/json"}
-            )
-            resp = urllib.request.urlopen(req, timeout=10).read().decode()
+            o = self.http_post_json("/simulate/simple", payload, timeout=25)
+            if "run_id" in o:
+                self.run_id.setValue(int(o["run_id"]))
+                self.rep_run_id.setValue(int(o["run_id"]))
             self.load_last()
-            QMessageBox.information(self, "Simulación", f"Ejecutada: {resp}")
+            QMessageBox.information(self, "Simulación", f"Ejecutada: {json.dumps(o, ensure_ascii=False)}")
         except urllib.error.URLError as e:
             QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")
         except Exception as e:
@@ -343,8 +830,7 @@ class MainWindow(QMainWindow):
     def load_series_plot(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
-            resp = urllib.request.urlopen(f"{base}/figures/{run_id}/series", timeout=15).read()
+            resp = self.http_get(f"/figures/{run_id}/series", timeout=25)
             bio = io.BytesIO(resp)
             z = np.load(bio)
             frames = z["frames"]
@@ -368,9 +854,7 @@ class MainWindow(QMainWindow):
     def load_spectrum_api(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
-            data = urllib.request.urlopen(f"{base}/figures/{run_id}/spectrum", timeout=10).read().decode()
-            o = json.loads(data)
+            o = json.loads(self.http_get_text(f"/figures/{run_id}/spectrum", timeout=15))
             k = np.array(o["k"])
             ps = np.array(o["ps"])
             self.fig2.clear()
@@ -392,17 +876,15 @@ class MainWindow(QMainWindow):
     def update_roi_dynamic(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             x0 = int(self.roi_x0.value())
             y0 = int(self.roi_y0.value())
             w = int(self.roi_w.value())
             h = int(self.roi_h.value())
             # Spectrum with ROI
-            data_all = urllib.request.urlopen(f"{base}/figures/{run_id}/spectrum", timeout=10).read().decode()
-            o_all = json.loads(data_all)
-            url_roi = f"{base}/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
-            data_roi = urllib.request.urlopen(url_roi, timeout=10).read().decode()
-            o_roi = json.loads(data_roi)
+            o_all = json.loads(self.http_get_text(f"/figures/{run_id}/spectrum", timeout=15))
+            o_roi = json.loads(
+                self.http_get_text(f"/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}", timeout=15)
+            )
             k_all = np.array(o_all["k"])
             ps_all = np.array(o_all["ps"])
             k_roi = np.array(o_roi["k"])
@@ -421,9 +903,9 @@ class MainWindow(QMainWindow):
             ax2.legend()
             self.canvas2.draw_idle()
             # Autocorr with ROI
-            url_ac = f"{base}/figures/{run_id}/autocorr-roi?x0={x0}&y0={y0}&w={w}&h={h}"
-            data_ac = urllib.request.urlopen(url_ac, timeout=10).read().decode()
-            o_ac = json.loads(data_ac)
+            o_ac = json.loads(
+                self.http_get_text(f"/figures/{run_id}/autocorr-roi?x0={x0}&y0={y0}&w={w}&h={h}", timeout=15)
+            )
             ac = np.array(o_ac["autocorr"])
             self.fig3.clear()
             ax3 = self.fig3.add_subplot(111)
@@ -436,10 +918,8 @@ class MainWindow(QMainWindow):
     def load_autocorr_api(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             crop = int(self.crop.value())
-            data = urllib.request.urlopen(f"{base}/figures/{run_id}/autocorr?crop={crop}", timeout=10).read().decode()
-            o = json.loads(data)
+            o = json.loads(self.http_get_text(f"/figures/{run_id}/autocorr?crop={crop}", timeout=20))
             ac = np.array(o["autocorr"], dtype=np.float32)
             self.fig3.clear()
             ax = self.fig3.add_subplot(111)
@@ -455,14 +935,12 @@ class MainWindow(QMainWindow):
     def load_spectrum_roi_api(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             x0 = int(self.roi_x0.value())
             y0 = int(self.roi_y0.value())
             w = int(self.roi_w.value())
             h = int(self.roi_h.value())
-            url = f"{base}/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
-            data = urllib.request.urlopen(url, timeout=10).read().decode()
-            o = json.loads(data)
+            path = f"/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            o = json.loads(self.http_get_text(path, timeout=15))
             k = np.array(o["k"])
             ps = np.array(o["ps"])
             self.fig2.clear()
@@ -484,14 +962,12 @@ class MainWindow(QMainWindow):
     def load_autocorr_roi_api(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             x0 = int(self.roi_x0.value())
             y0 = int(self.roi_y0.value())
             w = int(self.roi_w.value())
             h = int(self.roi_h.value())
-            url = f"{base}/figures/{run_id}/autocorr-roi?x0={x0}&y0={y0}&w={w}&h={h}"
-            data = urllib.request.urlopen(url, timeout=10).read().decode()
-            o = json.loads(data)
+            path = f"/figures/{run_id}/autocorr-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            o = json.loads(self.http_get_text(path, timeout=15))
             ac = np.array(o["autocorr"], dtype=np.float32)
             self.fig3.clear()
             ax = self.fig3.add_subplot(111)
@@ -507,14 +983,12 @@ class MainWindow(QMainWindow):
     def export_roi_csv(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             x0 = int(self.roi_x0.value())
             y0 = int(self.roi_y0.value())
             w = int(self.roi_w.value())
             h = int(self.roi_h.value())
-            url = f"{base}/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
-            data = urllib.request.urlopen(url, timeout=10).read().decode()
-            o = json.loads(data)
+            path = f"/figures/{run_id}/spectrum-roi?x0={x0}&y0={y0}&w={w}&h={h}"
+            o = json.loads(self.http_get_text(path, timeout=15))
             path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Guardar ROI espectro CSV",
@@ -566,9 +1040,7 @@ class MainWindow(QMainWindow):
     def refresh_run_state(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
-            data = urllib.request.urlopen(f"{base}/runs/{run_id}", timeout=10).read().decode()
-            o = json.loads(data)
+            o = json.loads(self.http_get_text(f"/runs/{run_id}", timeout=15))
             self.status_label.setText(f"status: {o.get('status','-')}")
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -576,10 +1048,7 @@ class MainWindow(QMainWindow):
     def abort_run(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
-            req = urllib.request.Request(f"{base}/runs/{run_id}/abort", data=b"", method="POST")
-            data = urllib.request.urlopen(req, timeout=10).read().decode()
-            o = json.loads(data)
+            o = self.http_post_empty(f"/runs/{run_id}/abort", timeout=20)
             self.status_label.setText(f"status: {o.get('status','-')}")
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -587,10 +1056,7 @@ class MainWindow(QMainWindow):
     def retry_run(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
-            req = urllib.request.Request(f"{base}/runs/{run_id}/retry", data=b"", method="POST")
-            data = urllib.request.urlopen(req, timeout=10).read().decode()
-            o = json.loads(data)
+            o = self.http_post_empty(f"/runs/{run_id}/retry", timeout=20)
             self.status_label.setText(f"status: {o.get('status','-')}")
         except Exception as e:
             QMessageBox.warning(self, "Error", str(e))
@@ -598,11 +1064,10 @@ class MainWindow(QMainWindow):
     def download_snapshot(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             path, _ = QFileDialog.getSaveFileName(self, "Guardar snapshot", f"snapshot_{run_id}.png", "PNG (*.png)")
             if not path:
                 return
-            data = urllib.request.urlopen(f"{base}/figures/{run_id}/snapshot", timeout=15).read()
+            data = self.http_get(f"/figures/{run_id}/snapshot", timeout=25)
             with open(path, "wb") as f:
                 f.write(data)
             QMessageBox.information(self, "Descarga", f"Guardado en {path}")
@@ -614,11 +1079,10 @@ class MainWindow(QMainWindow):
     def download_series(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             path, _ = QFileDialog.getSaveFileName(self, "Guardar serie", f"series_{run_id}.npz", "NPZ (*.npz)")
             if not path:
                 return
-            data = urllib.request.urlopen(f"{base}/figures/{run_id}/series", timeout=20).read()
+            data = self.http_get(f"/figures/{run_id}/series", timeout=30)
             with open(path, "wb") as f:
                 f.write(data)
             QMessageBox.information(self, "Descarga", f"Guardado en {path}")
@@ -630,11 +1094,10 @@ class MainWindow(QMainWindow):
     def download_field(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
             path, _ = QFileDialog.getSaveFileName(self, "Guardar campo", f"field_{run_id}.npy", "NPY (*.npy)")
             if not path:
                 return
-            data = urllib.request.urlopen(f"{base}/figures/{run_id}/field", timeout=20).read()
+            data = self.http_get(f"/figures/{run_id}/field", timeout=30)
             with open(path, "wb") as f:
                 f.write(data)
             QMessageBox.information(self, "Descarga", f"Guardado en {path}")
@@ -646,9 +1109,7 @@ class MainWindow(QMainWindow):
     def export_series_metrics_csv(self):
         try:
             run_id = int(self.run_id.value())
-            base = "http://127.0.0.1:8000"
-            data = urllib.request.urlopen(f"{base}/figures/{run_id}/series-metrics", timeout=20).read().decode()
-            o = json.loads(data)
+            o = json.loads(self.http_get_text(f"/figures/{run_id}/series-metrics", timeout=30))
             if int(o.get("length", 0)) == 0:
                 QMessageBox.information(self, "CSV", "No hay series métricas disponibles")
                 return
@@ -670,83 +1131,12 @@ class MainWindow(QMainWindow):
         try:
             run_id = int(self.run_id.value())
             crop = int(self.crop.value())
-            base = "http://127.0.0.1:8000"
             path, _ = QFileDialog.getSaveFileName(
                 self, "Guardar reporte HTML", f"report_run_{run_id}.html", "HTML (*.html)"
             )
             if not path:
                 return
-            # Snapshot
-            snapshot = urllib.request.urlopen(f"{base}/figures/{run_id}/snapshot", timeout=15).read()
-            # Spectrum
-            spec = json.loads(urllib.request.urlopen(f"{base}/figures/{run_id}/spectrum", timeout=10).read().decode())
-            k = np.array(spec.get("k", []), dtype=np.float32)
-            ps = np.array(spec.get("ps", []), dtype=np.float32)
-            # Autocorr
-            acj = json.loads(
-                urllib.request.urlopen(f"{base}/figures/{run_id}/autocorr?crop={crop}", timeout=10).read().decode()
-            )
-            ac = np.array(acj.get("autocorr", []), dtype=np.float32)
-            # Series metrics
-            ser = json.loads(
-                urllib.request.urlopen(f"{base}/figures/{run_id}/series-metrics", timeout=20).read().decode()
-            )
-            # Build images
-            # Spectrum image
-            figS = Figure(figsize=(5, 3), dpi=120)
-            axS = figS.add_subplot(111)
-            if k.size:
-                if self.spec_log.isChecked():
-                    axS.semilogy(k, ps, label="Espectro radial")
-                else:
-                    axS.plot(k, ps, label="Espectro radial")
-                axS.set_xlabel("k")
-                axS.set_ylabel("potencia")
-                axS.grid(True)
-                axS.legend()
-            bufS = io.BytesIO()
-            figS.savefig(bufS, format="png", bbox_inches="tight")
-            # Autocorr image
-            figA = Figure(figsize=(4, 4), dpi=120)
-            axA = figA.add_subplot(111)
-            if ac.size:
-                im = axA.imshow(ac, cmap="viridis", origin="lower")
-                figA.colorbar(im, ax=axA, fraction=0.046, pad=0.04)
-            bufA = io.BytesIO()
-            figA.savefig(bufA, format="png", bbox_inches="tight")
-            # Energy image
-            e_b64 = ""
-            if int(ser.get("length", 0)) > 0:
-                e = np.array([m.get("energy", np.nan) for m in ser["series"]], dtype=np.float32)
-                figE = Figure(figsize=(5, 3), dpi=120)
-                axE = figE.add_subplot(111)
-                axE.plot(np.arange(len(e)), e, label="Energía")
-                axE.set_xlabel("frame")
-                axE.set_ylabel("energía")
-                axE.grid(True)
-                axE.legend()
-                bufE = io.BytesIO()
-                figE.savefig(bufE, format="png", bbox_inches="tight")
-                e_b64 = "data:image/png;base64," + base64.b64encode(bufE.getvalue()).decode()
-            # Compose HTML
-            snap_b64 = "data:image/png;base64," + base64.b64encode(snapshot).decode()
-            spec_b64 = "data:image/png;base64," + base64.b64encode(bufS.getvalue()).decode()
-            auto_b64 = "data:image/png;base64," + base64.b64encode(bufA.getvalue()).decode()
-            html = f"""<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><title>Reporte Run {run_id}</title>
-<style>
-body{{font-family:Arial;margin:20px}}
-.grid{{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}}
-.card{{border:1px solid #ccc;padding:12px;border-radius:8px}}
-img{{max-width:100%}}
-</style>
-</head><body><h1>Reporte de Run {run_id}</h1>
-<div class="grid">
-<div class="card"><h2>Snapshot</h2><img src="{snap_b64}"/></div>
-<div class="card"><h2>Energía vs tiempo</h2>{('<img src=\"'+e_b64+'\"/>') if e_b64 else '<p>Sin serie</p>'}</div>
-<div class="card"><h2>Espectro radial</h2><img src="{spec_b64}"/></div>
-<div class="card"><h2>Autocorrelación 2D</h2><img src="{auto_b64}"/></div>
-</div></body></html>"""
+            html = self.http_get_text(f"/reports/run/{run_id}/html?crop={crop}", timeout=40)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
             QMessageBox.information(self, "Reporte", f"Reporte guardado en {path}")

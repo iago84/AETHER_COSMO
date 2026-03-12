@@ -57,19 +57,49 @@ def test_ai_run_on_run_and_download(tmp_path: Path):
         path = r.json()["path"]
         d = client.get(f"/ai/download?path={path}")
         assert d.status_code == 200
+        alist = client.get("/artifacts", params={"run_id": run_id})
+        assert alist.status_code == 200
+        a0 = alist.json()[0]
+        dl = client.get(f"/artifacts/{a0['id']}/download")
+        assert dl.status_code == 200
 
 
 def test_ai_run_on_dataset_and_download(tmp_path: Path):
     with TestClient(app) as client:
         rp = client.post("/projects", json={"name": "P-AI-DS"})
         pid = rp.json()["id"]
-        _ = client.post("/experiments", json={"project_id": pid, "name": "E-AI-DS"})
+        re = client.post("/experiments", json={"project_id": pid, "name": "E-AI-DS"})
+        eid = re.json()["id"]
         p = tmp_path / "map.npy"
         np.save(p.as_posix(), np.random.default_rng(0).normal(size=(8, 8)).astype(np.float32))
         rd = client.post("/datasets", json={"name": "planck-local", "path": p.as_posix()})
         did = rd.json()["id"]
+        rl = client.post(f"/experiments/{eid}/datasets/link?dataset_id={did}")
+        assert rl.status_code == 200
         r = client.post("/ai/run-on-dataset", json={"dataset_id": did, "method": "mean_dist"})
         assert r.status_code == 200
         path = r.json()["path"]
         d = client.get(f"/ai/download?path={path}")
         assert d.status_code == 200
+        alist = client.get("/artifacts", params={"dataset_id": did})
+        assert alist.status_code == 200
+        a0 = alist.json()[0]
+        dl = client.get(f"/artifacts/{a0['id']}/download")
+        assert dl.status_code == 200
+
+
+def test_etl_dataset_endpoint(tmp_path: Path):
+    with TestClient(app) as client:
+        rp = client.post("/projects", json={"name": "P-ETL-EP"})
+        pid = rp.json()["id"]
+        _ = client.post("/experiments", json={"project_id": pid, "name": "E-ETL-EP"})
+        p = tmp_path / "map.npy"
+        np.save(p.as_posix(), np.random.default_rng(0).normal(size=(8, 8)).astype(np.float32))
+        rd = client.post("/datasets", json={"name": "planck-local", "path": p.as_posix()})
+        did = rd.json()["id"]
+        r = client.post("/etl/dataset", json={"dataset_id": did, "normalize": "minmax", "qc": True})
+        assert r.status_code == 200
+        o = r.json()
+        assert Path(o["features_path"]).exists()
+        assert Path(o["qc_path"]).exists()
+        assert o["artifact_features_id"] is not None
