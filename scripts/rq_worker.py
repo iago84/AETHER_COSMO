@@ -37,7 +37,7 @@ def run_sim_job(payload: dict) -> dict:
             lam=float(payload.get("lam", 0.5)),
             diff=float(payload.get("diff", 0.2)),
             noise=float(payload.get("noise", 0.0)),
-            seed=123,
+            seed=int(payload.get("seed")) if payload.get("seed") is not None else 123,
             boundary=str(payload.get("boundary", "periodic")),
         )
         sk = str(payload.get("source_kind", "gaussian_pulse"))

@@ -11,11 +11,9 @@
 - Documentación inicial: `docs/*`, `README.md`, `ROADMAP.md`
 
 **Parcial**
-- Visualizaciones rápidas (PCA/plots) aún no integradas con el flujo de runs/datasets
+- Smoke manual (API + UI + export) y documentación con capturas aún pendientes
 
 **Pendiente (para v1)**
-- Guardado de modelos entrenados y sus artefactos (versionado / descarga)
-- Validaciones de estabilidad más estrictas (dt/lam/diff/noise) y límites explícitos en UI
 - DevOps de despliegue (si el objetivo es producción): configuración y guía operativa
 
 ## Checklist (MVP → v1)
@@ -74,5 +72,5 @@
 
 ### Docs / Experimentos
 - [ ] Manual de usuario actualizado con capturas y flujos (UI/API)
-- [ ] Documento técnico alineado con el estado real del código y limitaciones
-- [ ] Protocolo de experimentos reproducibles (plantilla + buenas prácticas)
+- [x] Documento técnico alineado con el estado real del código y limitaciones
+- [x] Protocolo de experimentos reproducibles (plantilla + buenas prácticas)

@@ -10,6 +10,8 @@ services:
     environment:
       - AETHERLAB_DB_URL=postgresql+psycopg2://aether:aether@db:5432/aetherlab
       - REDIS_URL=redis://redis:6379/0
+      - AETHERLAB_API_KEY=${AETHERLAB_API_KEY:-}
+      - AETHERLAB_CLEANUP_DAYS=${AETHERLAB_CLEANUP_DAYS:-30}
     command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn aetherlab.apps.api.main:app --host 0.0.0.0 --port 8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
@@ -19,6 +21,19 @@ services:
     depends_on:
       - db
       - redis
+    restart: unless-stopped
+  worker:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      - AETHERLAB_DB_URL=postgresql+psycopg2://aether:aether@db:5432/aetherlab
+      - REDIS_URL=redis://redis:6379/0
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python scripts/rq_worker.py"
+    depends_on:
+      - redis
+      - db
     restart: unless-stopped
   db:
     image: postgres:15

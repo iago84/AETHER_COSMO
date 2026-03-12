@@ -53,9 +53,16 @@ print(project, experiment)
 
 ```python
 payload={
-  "experiment_id": experiment["id"], "steps":80, "boundary":"absorbing",
-  "source_kind":"lorentzian", "gamma":9.0, "sigma":10, "amplitude":1.0,
-  "save_series": True, "series_stride": 10
+  "experiment_id": experiment["id"],
+  "nx": 128, "ny": 128,
+  "steps": 120, "dt": 0.05,
+  "lam": 0.5, "diff": 0.2, "noise": 0.0,
+  "seed": 123,
+  "boundary": "absorbing",
+  "source_kind": "lorentzian",
+  "cx": 64, "cy": 64,
+  "gamma": 9.0, "sigma": 10, "duration": 20, "amplitude": 1.0,
+  "save_series": True, "series_stride": 10,
 }
 req = urllib.request.Request(base+"/simulate/simple", data=json.dumps(payload).encode(), headers={"Content-Type":"application/json"})
 print(urllib.request.urlopen(req).read().decode())
@@ -65,11 +72,19 @@ print(urllib.request.urlopen(req).read().decode())
 
 - `GET /runs` y `GET /runs/{id}`
 - `GET /figures/{id}/snapshot|metrics|field|series|series-metrics|spectrum|autocorr?crop=96`
+- Export académico:
+  - `GET /figures/{id}/snapshot.svg` y `GET /figures/{id}/snapshot.pdf`
 
 4) Asíncrono:
 
 - `POST /simulate/async` → devuelve `run_id` (y `job_id` si RQ).
 - `GET /runs/{id}` para el estado; `abort`/`retry` disponibles en RQ.
+
+5) Barridos reproducibles:
+
+- `POST /sweeps/grid` con `base` + `grid` → devuelve `run_ids`.
+- Consultar por experimento:
+  - `GET /runs?experiment_id={id}`
 
 ## UI de Escritorio (PyQt6)
 
@@ -80,10 +95,19 @@ python aetherlab\apps\desktop\main.py
 ### Controles
 - API base (por defecto `http://127.0.0.1:8000`).
 - Selector de proyecto y experimento (crear/refrescar/seleccionar).
-- Parámetros de simulación: fuente, boundary, steps, dt, amplitud, sigma, radius, gamma, frequency (según la fuente).
-- Guardar serie y stride.
+- Parámetros de simulación:
+  - Tamaño: `nx`, `ny`
+  - Dinámica: `steps`, `dt`, `lam`, `diff`, `noise`
+  - Fuente: `source_kind` + parámetros (`sigma`, `radius`, `gamma`, `frequency`, `duration`, `amplitude`)
+  - Posición fuente: `cx`, `cy`
+  - Seed: “Seed auto” (sin seed explícita) o seed fijo
+  - Presets: atajos para configurar parámetros típicos
+- Ejecución:
+  - “Asíncrono” para usar `/simulate/async`
+  - “Auto refrescar” para polling de estado
+- Guardar serie: “Guardar serie” y `stride`.
 - run_id y estado con botones: Actualizar, Abortar, Reintentar (si RQ).
-- Export unificado: Reporte HTML, métricas CSV, snapshot PNG, serie NPZ, campo NPY, ROI CSV, MP4.
+- Export unificado: Reporte HTML, métricas CSV, snapshot PNG/SVG/PDF, serie NPZ, campo NPY, ROI CSV, MP4.
 - Reproducción de series: “Reproducir/Parar” y control de frame actual.
 
 ### Visualización
@@ -105,6 +129,13 @@ python aetherlab\apps\desktop\main.py
 4) Pulsa “Espectro (API)” y marca “Espectro en log” si quieres escala log.  
 5) Pulsa “Autocorr (API)” y ajusta “crop” para inspección local.  
 6) Descarga artefactos o exporta CSV para análisis externo.
+
+### Capturas (pendiente de incorporar al manual)
+- Pantalla principal con selector de proyecto/experimento y presets.
+- Ejecución asíncrona mostrando estado `queued/running/finished` y backend.
+- Export unificado con snapshot SVG/PDF.
+- Pestaña Comparación con métricas (mse/ssim/nrmse) y figura.
+- Pestaña IA con “PCA serie”.
 
 ## Datos y IA
 
@@ -142,6 +173,6 @@ python aetherlab\apps\desktop\main.py
 - Usar reportes HTML:
   - `GET /reports/run/{id}/html` y `GET /reports/experiment/{id}/html`.
 - Comparación:
-  - `GET /compare/run-run` y `GET /compare/run-dataset` (+ `.../figure.png`).
+  - `GET /compare/run-run` y `GET /compare/run-dataset` (+ `.../figure.png|.svg|.pdf`).
 - Limpieza de datos:
   - `POST /data/cleanup?days=30` para eliminar outputs/features antiguos.

@@ -62,6 +62,58 @@
 5) Exportar CSV/HTML, comparar (run↔run / run↔dataset) y revisar figuras y métricas.
 6) Documentar hipótesis asociada y observaciones.
 
+## Protocolo reproducible (paso a paso)
+1) Preparación
+   - Registrar versión del código (commit/tag) y el entorno (Python, SO, dependencias).
+   - Verificar API: `GET /health`.
+2) Crear estructura en DB
+   - `POST /projects` → `project_id`
+   - `POST /experiments` → `experiment_id`
+3) Ejecución de runs (síncrono y asíncrono)
+   - Síncrono (1 run): `POST /simulate/simple` con `seed` explícita y `config` completa.
+   - Asíncrono (colas): `POST /simulate/async` con `seed` explícita o determinista y `save_series` si se necesita serie.
+   - Guardar siempre el `run_id` retornado.
+4) Barridos reproducibles (campañas)
+   - `POST /sweeps/grid` con:
+     - `base`: configuración base completa (incluye `nx/ny/dt/lam/diff/noise/source_kind/...`).
+     - `grid`: parámetros a variar (p.ej. `{"lam":[0.1,0.2], "diff":[0.2,0.4]}`).
+     - `seed_base`: para generar seeds deterministas por combinación.
+   - Guardar `run_ids` como “manifiesto” del barrido (orden y parámetros).
+5) Auditoría de configuración y estado
+   - `GET /runs?experiment_id={id}` para listar runs del experimento.
+   - `GET /runs/{run_id}` para:
+     - `status` y backend (`background`/`rq`)
+     - `seed` y `config` (configuración reproducible)
+6) Export de artefactos y evidencias
+   - Campo/figuras:
+     - `GET /figures/{run}/snapshot` (PNG)
+     - `GET /figures/{run}/snapshot.svg` (SVG)
+     - `GET /figures/{run}/snapshot.pdf` (PDF)
+     - `GET /figures/{run}/field` (NPY)
+   - Series:
+     - `GET /figures/{run}/series` (NPZ)
+     - `GET /figures/{run}/series-metrics.csv` (CSV)
+   - Reporte:
+     - `GET /reports/run/{run}/html` (HTML)
+7) Comparación y validación cruzada
+   - run↔run:
+     - `GET /compare/run-run?run_a=...&run_b=...`
+     - Figura: `GET /compare/run-run/figure.png|.svg|.pdf?...`
+   - run↔dataset:
+     - `GET /compare/run-dataset?...`
+   - Métricas clave: `mse`, `rmse`, `nrmse`, `corr`, `ssim`, `spectrum_l2`.
+8) Datos reales (ETL + IA)
+   - Registrar dataset: `POST /datasets`
+   - Vincular a experimento: `POST /experiments/{eid}/datasets/link?dataset_id=...`
+   - ETL: `POST /etl/dataset` (incluye `normalize` + `qc`)
+   - Artefactos: `GET /artifacts?dataset_id=...` y/o `GET /artifacts?experiment_id=...`
+9) Cierre del experimento
+   - Guardar una ficha con:
+     - objetivo + hipótesis
+     - lista de `run_id` (y `run_ids` del barrido)
+     - parámetros/semillas (desde `config` de cada run)
+     - artefactos exportados (archivos locales) y métricas resumidas
+
 ## Plantilla de Ficha de Experimento
 - Identificación:
   - Proyecto / Experimento / Fecha / Autor

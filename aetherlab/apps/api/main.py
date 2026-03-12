@@ -4,6 +4,7 @@ import base64
 import io
 import itertools
 import os
+import pickle
 import time
 from pathlib import Path
 from typing import Literal
@@ -35,7 +36,13 @@ from aetherlab.packages.aether_data.etl import (
     process_map_to_features,
     process_strain_to_features,
 )
-from aetherlab.packages.aether_ai.baseline import dbscan_labels, isolation_forest_score, pca_outlier_score
+from aetherlab.packages.aether_ai.baseline import (
+    dbscan_labels,
+    fit_isolation_forest,
+    fit_mean_dist_model,
+    isolation_forest_score,
+    pca_outlier_score,
+)
 from aetherlab.packages.aether_sim.metrics import autocorr2d, compute_metrics, corrcoef2d, power_spectrum_radial, ssim2d
 from aetherlab.packages.aether_sim.simulator2d import Simulator2D
 from aetherlab.packages.aether_sim.sources import (
@@ -1189,7 +1196,7 @@ def list_model_runs(experiment_id: int | None = None, db: Session = Depends(get_
             "experiment_id": m.experiment_id,
             "model_name": m.model_name,
             "status": m.status,
-                "metrics": json.loads(m.metrics_json) if m.metrics_json else None,
+            "metrics": json.loads(m.metrics_json) if m.metrics_json else None,
         }
         for m in rows
     ]
@@ -1223,11 +1230,21 @@ def get_model_run(model_run_id: int, db: Session = Depends(get_session)):
     }
 
 
+def _maybe_json_text(s: str | None):
+    if not s:
+        return None
+    try:
+        return json.loads(s)
+    except Exception:
+        return s
+
+
 @app.get("/artifacts")
 def list_artifacts(
     run_id: int | None = None,
     dataset_id: int | None = None,
     experiment_id: int | None = None,
+    model_run_id: int | None = None,
     db: Session = Depends(get_session),
 ):
     stmt = select(Artifact).order_by(Artifact.id.desc())
@@ -1237,6 +1254,8 @@ def list_artifacts(
         stmt = stmt.where(Artifact.dataset_id == dataset_id)
     if experiment_id is not None:
         stmt = stmt.where(Artifact.experiment_id == experiment_id)
+    if model_run_id is not None:
+        stmt = stmt.where(Artifact.model_run_id == model_run_id)
     rows = db.execute(stmt).scalars().all()
     return [
         {
@@ -1244,8 +1263,10 @@ def list_artifacts(
             "run_id": a.run_id,
             "dataset_id": a.dataset_id,
             "experiment_id": getattr(a, "experiment_id", None),
+            "model_run_id": getattr(a, "model_run_id", None),
             "kind": a.kind,
             "path": a.path,
+            "meta": _maybe_json_text(getattr(a, "meta_json", None)),
             "created_at": str(a.created_at),
         }
         for a in rows
@@ -1262,8 +1283,10 @@ def get_artifact(artifact_id: int, db: Session = Depends(get_session)):
         "run_id": a.run_id,
         "dataset_id": a.dataset_id,
         "experiment_id": getattr(a, "experiment_id", None),
+        "model_run_id": getattr(a, "model_run_id", None),
         "kind": a.kind,
         "path": a.path,
+        "meta": _maybe_json_text(getattr(a, "meta_json", None)),
         "created_at": str(a.created_at),
     }
 
@@ -1279,6 +1302,13 @@ def _safe_download_path(p: Path) -> Path:
     if not pp.exists():
         raise HTTPException(status_code=404, detail="file not found")
     return pp
+
+
+def _ensure_data_dir(name: str) -> Path:
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
 
 
 @app.get("/artifacts/{artifact_id}/download")
@@ -1312,6 +1342,7 @@ def list_experiment_datasets(experiment_id: int, db: Session = Depends(get_sessi
 class AiRunOnRunRequest(BaseModel):
     run_id: int
     method: str = "isoforest"
+    random_state: int = 0
 
 
 @app.post("/ai/run-on-run")
@@ -1325,9 +1356,9 @@ def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)
         raise HTTPException(status_code=404, detail="field not found")
     X = u.reshape(-1, 1)
     if payload.method == "isoforest":
-        s = isolation_forest_score(X)
+        model_obj, s = fit_isolation_forest(X, random_state=payload.random_state)
     elif payload.method == "mean_dist":
-        s = pca_outlier_score(X)
+        model_obj, s = fit_mean_dist_model(X)
     else:
         raise HTTPException(status_code=400, detail="unknown method")
     root = Path(__file__).resolve().parents[3]
@@ -1349,23 +1380,69 @@ def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)
     mr = ModelRun(
         experiment_id=obj.experiment_id,
         model_name=payload.method,
-        params_json=json.dumps({}),
+        params_json=json.dumps({"random_state": int(payload.random_state)}, ensure_ascii=False)
+        if payload.method == "isoforest"
+        else json.dumps({}, ensure_ascii=False),
         status="finished",
         metrics_json=json.dumps(score_stats),
     )
     db.add(mr)
     db.commit()
     db.refresh(mr)
-    art = Artifact(run_id=obj.id, kind="ai_scores", path=out_path.as_posix())
-    db.add(art)
+    model_dir = _ensure_data_dir("models")
+    if payload.method == "isoforest":
+        raw = pickle.dumps(model_obj)
+        full_sha = hashlib.sha256(raw).hexdigest()
+        digest = full_sha[:12]
+        model_path = model_dir / f"isoforest_run{obj.id}_mr{mr.id}_{digest}.pkl"
+        with open(model_path.as_posix(), "wb") as f:
+            f.write(raw)
+        model_kind = "model_iforest_pickle"
+        model_meta = {"format": "pickle", "sha256": full_sha, "sha12": digest}
+    else:
+        raw = model_obj["mu"].tobytes()
+        full_sha = hashlib.sha256(raw).hexdigest()
+        digest = full_sha[:12]
+        model_path = model_dir / f"mean_dist_run{obj.id}_mr{mr.id}_{digest}.npz"
+        np.savez_compressed(model_path.as_posix(), **model_obj)
+        model_kind = "model_mean_dist_npz"
+        model_meta = {"format": "npz", "sha256": full_sha, "sha12": digest}
+    art_scores = Artifact(
+        run_id=obj.id,
+        experiment_id=obj.experiment_id,
+        model_run_id=mr.id,
+        kind="ai_scores",
+        path=out_path.as_posix(),
+        meta_json=json.dumps({"format": "csv"}, ensure_ascii=False),
+    )
+    art_model = Artifact(
+        run_id=obj.id,
+        experiment_id=obj.experiment_id,
+        model_run_id=mr.id,
+        kind=model_kind,
+        path=model_path.as_posix(),
+        meta_json=json.dumps(model_meta, ensure_ascii=False),
+    )
+    db.add(art_scores)
+    db.add(art_model)
     db.commit()
-    return {"path": out_path.as_posix(), "model_run_id": mr.id, "artifact_path": art.path}
+    db.refresh(art_scores)
+    db.refresh(art_model)
+    return {
+        "path": out_path.as_posix(),
+        "model_run_id": mr.id,
+        "artifact_scores_id": art_scores.id,
+        "artifact_model_id": art_model.id,
+        "artifact_scores_path": art_scores.path,
+        "artifact_model_path": art_model.path,
+    }
 
 
 class AiRunOnRunSeriesRequest(BaseModel):
     run_id: int
     method: str = "isoforest"
     window: int = Field(default=1, ge=1, le=1000)
+    random_state: int = 0
 
 
 @app.post("/ai/run-on-run-series")
@@ -1395,9 +1472,9 @@ def ai_run_on_run_series(payload: AiRunOnRunSeriesRequest, db: Session = Depends
         feats = wsum / float(k)
         index_offset = k - 1
     if payload.method == "isoforest":
-        s = isolation_forest_score(feats)
+        model_obj, s = fit_isolation_forest(feats, random_state=payload.random_state)
     elif payload.method == "mean_dist":
-        s = pca_outlier_score(feats)
+        model_obj, s = fit_mean_dist_model(feats)
     else:
         raise HTTPException(status_code=400, detail="unknown method")
     root = Path(__file__).resolve().parents[3]
@@ -1423,21 +1500,63 @@ def ai_run_on_run_series(payload: AiRunOnRunSeriesRequest, db: Session = Depends
     mr = ModelRun(
         experiment_id=obj.experiment_id,
         model_name=f"{payload.method}_series",
-        params_json=json.dumps({"window": int(payload.window)}, ensure_ascii=False),
+        params_json=json.dumps(
+            {"window": int(payload.window), "random_state": int(payload.random_state)}, ensure_ascii=False
+        )
+        if payload.method == "isoforest"
+        else json.dumps({"window": int(payload.window)}, ensure_ascii=False),
         status="finished",
         metrics_json=json.dumps(score_stats),
     )
     db.add(mr)
     db.commit()
     db.refresh(mr)
-    art = Artifact(run_id=obj.id, experiment_id=obj.experiment_id, kind="ai_series_scores", path=out_path.as_posix())
-    db.add(art)
+    model_dir = _ensure_data_dir("models")
+    if payload.method == "isoforest":
+        raw = pickle.dumps(model_obj)
+        full_sha = hashlib.sha256(raw).hexdigest()
+        digest = full_sha[:12]
+        model_path = model_dir / f"isoforest_series_run{obj.id}_mr{mr.id}_{digest}.pkl"
+        with open(model_path.as_posix(), "wb") as f:
+            f.write(raw)
+        model_kind = "model_iforest_pickle"
+        model_meta = {"format": "pickle", "sha256": full_sha, "sha12": digest}
+    else:
+        raw = model_obj["mu"].tobytes()
+        full_sha = hashlib.sha256(raw).hexdigest()
+        digest = full_sha[:12]
+        model_path = model_dir / f"mean_dist_series_run{obj.id}_mr{mr.id}_{digest}.npz"
+        np.savez_compressed(model_path.as_posix(), **model_obj)
+        model_kind = "model_mean_dist_npz"
+        model_meta = {"format": "npz", "sha256": full_sha, "sha12": digest}
+    art_scores = Artifact(
+        run_id=obj.id,
+        experiment_id=obj.experiment_id,
+        model_run_id=mr.id,
+        kind="ai_series_scores",
+        path=out_path.as_posix(),
+        meta_json=json.dumps({"format": "csv"}, ensure_ascii=False),
+    )
+    art_model = Artifact(
+        run_id=obj.id,
+        experiment_id=obj.experiment_id,
+        model_run_id=mr.id,
+        kind=model_kind,
+        path=model_path.as_posix(),
+        meta_json=json.dumps(model_meta, ensure_ascii=False),
+    )
+    db.add(art_scores)
+    db.add(art_model)
     db.commit()
+    db.refresh(art_scores)
+    db.refresh(art_model)
     return {
         "path": out_path.as_posix(),
         "model_run_id": mr.id,
-        "artifact_id": art.id,
-        "artifact_path": art.path,
+        "artifact_scores_id": art_scores.id,
+        "artifact_model_id": art_model.id,
+        "artifact_scores_path": art_scores.path,
+        "artifact_model_path": art_model.path,
     }
 
 
@@ -1446,6 +1565,7 @@ class AiRunOnDatasetRequest(BaseModel):
     method: str = "isoforest"
     normalize: str | None = "zscore"
     qc: bool = True
+    random_state: int = 0
 
 
 @app.post("/ai/run-on-dataset")
@@ -1467,9 +1587,9 @@ def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"etl failed: {e}")
     if payload.method == "isoforest":
-        s = isolation_forest_score(X)
+        model_obj, s = fit_isolation_forest(X, random_state=payload.random_state)
     elif payload.method == "mean_dist":
-        s = pca_outlier_score(X)
+        model_obj, s = fit_mean_dist_model(X)
     else:
         raise HTTPException(status_code=400, detail="unknown method")
     out_dir = ensure_tree(root)["features"]
@@ -1493,32 +1613,92 @@ def ai_run_on_dataset(payload: AiRunOnDatasetRequest, db: Session = Depends(get_
         mr = ModelRun(
             experiment_id=link.experiment_id,
             model_name=payload.method,
-            params_json=json.dumps({"dataset_id": ds.id, "normalize": payload.normalize}),
+            params_json=json.dumps(
+                {"dataset_id": ds.id, "normalize": payload.normalize, "random_state": int(payload.random_state)},
+                ensure_ascii=False,
+            )
+            if payload.method == "isoforest"
+            else json.dumps({"dataset_id": ds.id, "normalize": payload.normalize}, ensure_ascii=False),
             status="finished",
             metrics_json=json.dumps(score_stats),
         )
         db.add(mr)
         db.commit()
         db.refresh(mr)
-        art_feat = Artifact(run_id=None, dataset_id=ds.id, kind="etl_features", path=features.as_posix())
-        db.add(art_feat)
-        db.commit()
-        db.refresh(art_feat)
+        model_dir = _ensure_data_dir("models")
+        if payload.method == "isoforest":
+            raw = pickle.dumps(model_obj)
+            full_sha = hashlib.sha256(raw).hexdigest()
+            digest = full_sha[:12]
+            model_path = model_dir / f"isoforest_ds{ds.id}_mr{mr.id}_{digest}.pkl"
+            with open(model_path.as_posix(), "wb") as f:
+                f.write(raw)
+            model_kind = "model_iforest_pickle"
+            model_meta = {"format": "pickle", "sha256": full_sha, "sha12": digest}
+        else:
+            raw = model_obj["mu"].tobytes()
+            full_sha = hashlib.sha256(raw).hexdigest()
+            digest = full_sha[:12]
+            model_path = model_dir / f"mean_dist_ds{ds.id}_mr{mr.id}_{digest}.npz"
+            np.savez_compressed(model_path.as_posix(), **model_obj)
+            model_kind = "model_mean_dist_npz"
+            model_meta = {"format": "npz", "sha256": full_sha, "sha12": digest}
+        art_feat = Artifact(
+            run_id=None,
+            dataset_id=ds.id,
+            experiment_id=link.experiment_id,
+            kind="etl_features",
+            path=features.as_posix(),
+            meta_json=json.dumps({"format": "npz"}, ensure_ascii=False),
+        )
         art_qc = None
         if payload.qc and qc_path.exists():
-            art_qc = Artifact(run_id=None, dataset_id=ds.id, kind="etl_qc", path=qc_path.as_posix())
+            art_qc = Artifact(
+                run_id=None,
+                dataset_id=ds.id,
+                experiment_id=link.experiment_id,
+                kind="etl_qc",
+                path=qc_path.as_posix(),
+                meta_json=json.dumps({"format": "json"}, ensure_ascii=False),
+            )
+        art_scores = Artifact(
+            run_id=None,
+            dataset_id=ds.id,
+            experiment_id=link.experiment_id,
+            model_run_id=mr.id,
+            kind="ai_scores",
+            path=out_path.as_posix(),
+            meta_json=json.dumps({"format": "csv"}, ensure_ascii=False),
+        )
+        art_model = Artifact(
+            run_id=None,
+            dataset_id=ds.id,
+            experiment_id=link.experiment_id,
+            model_run_id=mr.id,
+            kind=model_kind,
+            path=model_path.as_posix(),
+            meta_json=json.dumps(model_meta, ensure_ascii=False),
+        )
+        db.add(art_feat)
+        if art_qc is not None:
             db.add(art_qc)
-            db.commit()
-            db.refresh(art_qc)
-        art = Artifact(run_id=None, dataset_id=ds.id, kind="ai_scores", path=out_path.as_posix())
-        db.add(art)
+        db.add(art_scores)
+        db.add(art_model)
         db.commit()
+        db.refresh(art_feat)
+        if art_qc is not None:
+            db.refresh(art_qc)
+        db.refresh(art_scores)
+        db.refresh(art_model)
         return {
             "path": out_path.as_posix(),
             "features_path": features.as_posix(),
             "qc_path": qc_path.as_posix() if payload.qc else None,
             "model_run_id": mr.id,
-            "artifact_path": art.path,
+            "artifact_scores_id": art_scores.id,
+            "artifact_model_id": art_model.id,
+            "artifact_scores_path": art_scores.path,
+            "artifact_model_path": art_model.path,
             "artifact_features_id": art_feat.id,
             "artifact_qc_id": art_qc.id if art_qc is not None else None,
         }

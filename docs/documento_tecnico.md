@@ -15,22 +15,25 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
 - Capa de simulación (`aetherlab/packages/aether_sim`):
   - `simulator2d.py`: malla 2D, integración temporal con `dt`, `steps`, `lam`, `diff`, `noise` y `boundary` (periodic/fixed/absorbing). Permite `set_source` y `callback` por paso para muestrear series.
   - `sources.py`: fuentes `gaussian_pulse`, `periodic_gaussian`, `stochastic`, `top_hat`, `lorentzian`.
-  - `metrics.py`: `compute_metrics` (energía, media, varianza, correlación inmediata), `autocorr2d`, `power_spectrum_radial`.
+  - `metrics.py`: `compute_metrics` (energía, media, varianza, correlación), `autocorr2d`, `power_spectrum_radial` y métricas comparativas (`rmse`, `nrmse`, `ssim2d`).
 - Capa API (`aetherlab/apps/api`):
   - Gestión de proyectos, experimentos y runs.
   - Simulación síncrona (`POST /simulate/simple`) y asíncrona (`POST /simulate/async`).
   - Endpoints de resultados: snapshot, métricas, campo (.npy), serie (.npz), métricas de serie, espectro radial, autocorrelación 2D.
+  - Barridos reproducibles (`POST /sweeps/grid`) creando múltiples `SimulationRun` con `config_json` y `seed` deterministas.
+  - Comparación run↔run y run↔dataset con métricas y figura exportable (PNG/SVG/PDF).
   - Estado de runs con polling de Redis si `REDIS_URL` y `job_id` presente. Abort/Retry/Cleanup para RQ.
 - Capa de datos (`aetherlab/packages/aether_data`):
   - `registry.py`: loaders para Planck/GWOSC/SDSS con resumen estadístico.
-  - `etl.py`: estructura `raw/processed/features` y generación de features (mapas/strain).
+  - `etl.py`: estructura `raw/processed/features`, normalización (`zscore`, `minmax`, `robust`, `none`) y QC con trazabilidad (hash/mtime).
   - Endpoints: `GET /data/datasets`, `POST /data/load`; `POST/GET /datasets` (registro DB) y vínculo `POST /experiments/{eid}/datasets/link`.
 - Capa UI (`aetherlab/apps/desktop`):
-  - Control de parámetros (fuente, boundary, steps, dt, amplitud, etc.).
+  - Control de parámetros (nx/ny, fuente, cx/cy, boundary, steps, dt, lam/diff/noise, amplitude, sigma, duration, etc.), presets y validación explícita.
   - Pestañas de visualización: energía vs tiempo, espectro radial (lineal/log), autocorrelación 2D con recorte.
   - Reproducción de series NPZ con control de frame actual.
   - Selector de proyecto/experimento, pestañas de Datos/IA/Comparación/Reportes/Configuración y export unificado.
-  - Gestión de runs: estado, abortar, reintentar, descarga de artefactos y export (CSV/PNG/NPZ/MP4/HTML).
+  - Gestión de runs: estado (incluye backend y job_id), abortar, reintentar, descarga de artefactos y export (CSV/PNG/SVG/PDF/NPZ/MP4/HTML).
+  - Visualización rápida: PCA de métricas de serie usando `/ai/pca-plot` (PNG embebido en base64).
 - Capa Core (`aetherlab/packages/aether_core`):
   - ORM SQLAlchemy. Modelos `Project`, `Experiment`, `SimulationRun` (incluye `job_id`).
   - DB configurable por `AETHERLAB_DB_URL` (SQLite por defecto). Ajuste de esquema en arranque.
@@ -46,19 +49,21 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
 ## Esquema ORM
 - `Project(id, name, description, created_at)`
 - `Experiment(id, project_id, name, created_at)`
-- `SimulationRun(id, experiment_id, status, created_at, snapshot_path, job_id)`
+- `SimulationRun(id, experiment_id, status, created_at, snapshot_path, job_id, seed, config_json)`
 - `Dataset(id, name, path, description, created_at)`
 - `ModelRun(id, experiment_id, model_name, params_json, status, metrics_json, created_at)`
 - `ExperimentDataset(id, experiment_id, dataset_id, created_at)`
+- `Artifact(id, experiment_id, dataset_id, model_run_id, kind, path, meta_json, created_at)`
 
 ## Endpoints Principales
 - Proyectos/Experimentos: `POST/GET /projects`, `POST/GET /experiments`
 - Runs: `GET /runs`, `GET /runs/{id}`, `POST /runs/{id}/refresh`, `POST /runs/{id}/abort`, `POST /runs/{id}/retry`, `POST /runs/{id}/cleanup`
 - Simulación: `POST /simulate/simple`, `POST /simulate/async`
-- Resultados: `GET /figures/{run}/snapshot|metrics|field|series|series-metrics|spectrum|autocorr`
+- Barridos: `POST /sweeps/grid`
+- Resultados: `GET /figures/{run}/snapshot(.png)|snapshot.svg|snapshot.pdf|metrics|field|series|series-metrics|spectrum|autocorr`
 - Datos: `GET /data/datasets`, `POST /data/load`, `POST/GET /datasets`, `GET /datasets/{id}/meta`, `POST /etl/dataset`, `POST /experiments/{eid}/datasets/link`
 - IA: `POST /ai/outlier-score`, `POST /ai/dbscan`, `POST /ai/run-on-run`, `POST /ai/run-on-dataset`, `GET /ai/download`, `GET /models`
-- Comparación: `GET /compare/run-run`, `GET /compare/run-dataset` (+ `.../figure.png`)
+- Comparación: `GET /compare/run-run`, `GET /compare/run-dataset` (+ `.../figure.png|.svg|.pdf`)
 - Reportes: `GET /reports/run/{id}/html`, `GET /reports/experiment/{id}/html`
 
 ## Diseño Numérico
@@ -73,7 +78,7 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
 - Archivos por run:
   - `snapshot_*.png`, `snapshot_*.json`, `snapshot_*.npy`, `snapshot_*.npz` (si serie activa)
   - Derivados: features (`*.npz`) y QC (`*.qc.json`) bajo `aetherlab/data/features/` (ETL)
-  - Comparación: figura PNG retornada por endpoint (no persistida por defecto)
+  - Comparación: figura retornada por endpoint (PNG/SVG/PDF) (no persistida por defecto)
 
 ## Migraciones
 - Migración ligera en arranque (sin Alembic): tabla `schema_migrations` y `ALTER TABLE` idempotentes para columnas nuevas.
@@ -85,6 +90,16 @@ Plataforma para simulación y análisis de un campo 2D con backend FastAPI, ejec
 ## Seguridad y Configuración
 - Variables de entorno: `AETHERLAB_DB_URL`, `REDIS_URL`.
 - Sin secretos en repositorio. Archivos generados se guardan fuera de código.
+
+## Operación / CI
+- `docker-compose.yml` levanta API + Postgres + Redis y define healthchecks.
+- CI usa caching de pip para estabilizar tiempos de instalación.
+
+## Limitaciones conocidas
+- Algunos entornos de desarrollo pueden no tener Docker disponible; en ese caso, la verificación de Compose debe hacerse en una máquina con Docker Desktop/Engine.
+- Warnings actuales en runtime:
+  - FastAPI: deprecación de `on_event` (migrable a lifespan).
+  - Pydantic: warning por `model_name` en el namespace protegido.
 
 ## Extensibilidad
 - Nuevas fuentes y operadores: añadir a `sources.py` y/o `simulator2d.py`.

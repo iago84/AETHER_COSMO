@@ -76,6 +76,12 @@ def ensure_schema():
                 def m_artifact_experiment():
                     _sqlite_add_col("artifacts", "experiment_id", "experiment_id INTEGER NULL")
 
+                def m_artifact_model_run():
+                    _sqlite_add_col("artifacts", "model_run_id", "model_run_id INTEGER NULL")
+
+                def m_artifact_meta_json():
+                    _sqlite_add_col("artifacts", "meta_json", "meta_json TEXT NULL")
+
                 migrations.extend(
                     [
                         ("2026_03_12_simulation_runs_job_id", m_job_id),
@@ -84,6 +90,8 @@ def ensure_schema():
                         ("2026_03_12_model_runs_params_json", m_modelrun_params),
                         ("2026_03_12_model_runs_metrics_json", m_modelrun_metrics),
                         ("2026_03_12_artifacts_experiment_id", m_artifact_experiment),
+                        ("2026_03_12_artifacts_model_run_id", m_artifact_model_run),
+                        ("2026_03_12_artifacts_meta_json", m_artifact_meta_json),
                     ]
                 )
                 for mid, fn in migrations:
@@ -142,6 +150,18 @@ def ensure_schema():
                         "2026_03_12_artifacts_experiment_id",
                         [
                             "ALTER TABLE IF EXISTS artifacts ADD COLUMN IF NOT EXISTS experiment_id INTEGER",
+                        ],
+                    ),
+                    (
+                        "2026_03_12_artifacts_model_run_id",
+                        [
+                            "ALTER TABLE IF EXISTS artifacts ADD COLUMN IF NOT EXISTS model_run_id INTEGER",
+                        ],
+                    ),
+                    (
+                        "2026_03_12_artifacts_meta_json",
+                        [
+                            "ALTER TABLE IF EXISTS artifacts ADD COLUMN IF NOT EXISTS meta_json TEXT",
                         ],
                     ),
                 ]

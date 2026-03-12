@@ -81,6 +81,10 @@ Rutas básicas:
   - `GET /figures/{run_id}/series-metrics` → métricas por frame
   - `GET /figures/{run_id}/spectrum` → k, P(k)
   - `GET /figures/{run_id}/autocorr?crop=N` → autocorrelación 2D recortada
+- Artefactos y modelos:
+  - `GET /artifacts?run_id=...&dataset_id=...&experiment_id=...&model_run_id=...`
+  - `GET /artifacts/{artifact_id}/download` → descarga segura (bajo `aetherlab/data/`)
+  - `GET /models?experiment_id=...`, `GET /models/{model_run_id}`
 
 ### Asíncrono con RQ/Redis (opcional)
 
@@ -102,6 +106,28 @@ Operaciones sobre runs con RQ:
 
 - `POST /runs/{id}/abort` → cancelar job.
 - `POST /runs/{id}/retry` → reencolar si falló.
+
+## Docker Compose (API + Postgres + Redis + Worker)
+
+El `docker-compose.yml` levanta:
+
+- `api`: FastAPI + Uvicorn (puerto 8000).
+- `db`: Postgres 15 (puerto 5432).
+- `redis`: Redis 7 (puerto 6379).
+- `worker`: RQ worker para ejecutar simulaciones asíncronas.
+
+Variables de entorno útiles:
+
+- `AETHERLAB_DB_URL`: URL SQLAlchemy (por defecto en Compose apunta a Postgres).
+- `REDIS_URL`: URL de Redis (por defecto en Compose apunta al servicio `redis`).
+- `AETHERLAB_API_KEY`: si se define, exige header `X-API-Key` en POST/PUT/DELETE.
+- `AETHERLAB_CLEANUP_DAYS`: umbral (días) para limpieza automática de outputs.
+
+Ejecutar:
+
+```bash
+docker compose up
+```
 
 ## UI de Escritorio (PyQt6)
 
@@ -164,4 +190,3 @@ print(urllib.request.urlopen(base+"/figures/1/autocorr?crop=96").read().decode()
 ---
 
 Para dudas o mejoras, abre un issue o comenta en el proyecto.
-

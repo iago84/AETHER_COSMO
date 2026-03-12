@@ -70,11 +70,14 @@ class Artifact(Base):
     run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("simulation_runs.id"), nullable=True)
     dataset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("datasets.id"), nullable=True)
     experiment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("experiments.id"), nullable=True)
+    model_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("model_runs.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
     path: Mapped[str] = mapped_column(String(500), nullable=False)
+    meta_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     run: Mapped["SimulationRun"] = relationship()
     experiment: Mapped[Optional["Experiment"]] = relationship()
+    model_run: Mapped[Optional["ModelRun"]] = relationship()
 
 
 class Figure(Base):

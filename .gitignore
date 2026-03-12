@@ -20,6 +20,7 @@ Thumbs.db
 
 # Project outputs
 aetherlab/data/outputs/
+aetherlab/data/models/
 reports/*.html
 *.npz
 *.npy
