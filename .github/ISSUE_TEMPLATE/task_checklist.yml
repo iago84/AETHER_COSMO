@@ -1,11 +1,13 @@
 name: "Checklist de Fases/Tareas"
-description: "Seguimiento de un trabajo por fases con subtareas"
+description: "Checklist global del proyecto (MVP → v1) y seguimiento por módulos"
 title: "[Task]: "
 labels: ["task"]
 body:
   - type: markdown
     attributes:
-      value: "Usa esta plantilla para planificar y seguir un trabajo por fases."
+      value: |
+        Usa esta plantilla para planificar y seguir trabajos de mejora del proyecto.
+        Incluye un checklist global por módulos (UI/API/simulación/datos/IA/reportes/devops/docs) y una sección de verificación.
   - type: textarea
     id: objetivo
     attributes:
@@ -14,67 +16,94 @@ body:
     validations:
       required: true
   - type: checkboxes
-    id: planificacion
+    id: core_db
     attributes:
-      label: Planificación
+      label: Core / DB
       options:
-        - label: Definir alcance y criterios de aceptación
-        - label: Descomponer en tareas
-        - label: Estimar riesgos
+        - label: Definir migraciones de esquema (Alembic u otro)
+        - label: Completar trazabilidad (versiones/artefactos/tags/anotaciones) en API
+        - label: Persistir configuración completa de runs/IA (params_json + metadatos)
+        - label: Añadir borrado/retención segura de outputs (política y límites)
   - type: checkboxes
-    id: analisis
+    id: api
     attributes:
-      label: Análisis
+      label: API
       options:
-        - label: Backend ▸ Modelo de datos definido
-        - label: Backend ▸ Contratos/Endpoints acordados
-        - label: Frontend ▸ UX/UI bosquejado
-        - label: Infra ▸ Flujos CI/CD identificados
+        - label: Endpoints de comparación run↔run y run↔dataset (métricas y figuras)
+        - label: Endpoints de reportes más completos (resumen + links a artefactos)
+        - label: Robustecer validación/errores (mensajes consistentes, timeouts)
+        - label: Seguridad mínima (rate limit/auth opcional si se expone fuera de localhost)
   - type: checkboxes
-    id: implementacion
+    id: ui_desktop
     attributes:
-      label: Implementación
+      label: UI Desktop (PyQt6)
       options:
-        - label: Backend ▸ DB/Modelos
-        - label: Backend ▸ Endpoints
-        - label: Frontend ▸ UI
-        - label: Frontend ▸ Interacción
-        - label: Infra ▸ Scripts/Workflows
+        - label: Selector de proyecto/experimento y flujo de creación desde UI
+        - label: Panel lateral de parámetros con presets y validación clara
+        - label: Pestañas extra (Datos, IA, Comparación, Reportes, Configuración)
+        - label: Export avanzado (CSV/PNG/NPZ/MP4) con diálogo y paths claros
+        - label: Mejorar UX (estilo consistente, estados, errores y progreso)
   - type: checkboxes
-    id: pruebas
+    id: sim_metrics
     attributes:
-      label: Pruebas
+      label: Simulación / Cálculos / Métricas
       options:
-        - label: Unitarias ▸ Cobertura básica
-        - label: Integración ▸ Flujo crítico
-        - label: E2E ▸ Escenarios clave
-        - label: Rendimiento ▸ Métrica acordada
+        - label: Añadir métricas comparativas (distancias, similitud estructural, correlaciones)
+        - label: Control de estabilidad y validaciones (dt/lam/diff/noise)
+        - label: Barridos de parámetros (grid/latin) y guardado reproducible
+        - label: Export de series y métricas de serie (API + UI) consistente
   - type: checkboxes
-    id: documentacion
+    id: data_etl
     attributes:
-      label: Documentación
+      label: Datos / ETL
       options:
-        - label: Usuario ▸ Manual actualizado
-        - label: Técnico ▸ Diseño y decisiones
-        - label: DevOps ▸ Operación y despliegue
-        - label: Changelog/README actualizado
+        - label: ETL realista (normalizaciones, ventanas, features espectrales, cache trazable)
+        - label: Soporte de formatos y validación (npy/npz/csv/parquet/hdf5)
+        - label: Registro de datasets (hash/mtime/origen) y link con experimentos
+        - label: Reporte de calidad de datos (stats, nans, rangos, warnings)
   - type: checkboxes
-    id: despliegue
+    id: ai
     attributes:
-      label: Despliegue
+      label: IA
       options:
-        - label: Variables de entorno validadas
-        - label: Migraciones/DB aplicadas
-        - label: Worker/Redis verificado (si aplica)
-        - label: Artefactos y permisos verificados
+        - label: Formalizar interfaz de entrenamiento/evaluación (ModelRun + métricas)
+        - label: Añadir baseline adicionales (HDBSCAN/t-SNE/UMAP/PCA plots) si aplica
+        - label: Ejecutar IA sobre series/ventanas (no solo snapshots)
+        - label: Guardar artefactos (CSV/figuras/modelos) con descarga segura
   - type: checkboxes
-    id: seguimiento
+    id: reports_viz
     attributes:
-      label: Seguimiento
+      label: Reportes / Visualización
       options:
-        - label: Monitoreo básico activado
-        - label: Métricas/Alertas acordadas
-        - label: Tareas de mejora registradas
+        - label: Implementar aether_report (builder real) y plantillas reproducibles
+        - label: Reporte de experimento (parámetros + figuras + métricas + notas)
+        - label: Visualizaciones adicionales (comparativas, overlays, escalas log)
+        - label: Export académico (SVG/PDF) si se necesita
+  - type: checkboxes
+    id: devops_ci
+    attributes:
+      label: DevOps / CI
+      options:
+        - label: Docker Compose listo para uso (API+Redis+Postgres) con docs de arranque
+        - label: CI de lint/tests estable y rápido (caching, matriz mínima)
+        - label: Config de producción (logs, variables, healthchecks, puertos)
+  - type: checkboxes
+    id: docs_experiments
+    attributes:
+      label: Docs / Experimentos
+      options:
+        - label: Manual de usuario actualizado (UI + API + flujos)
+        - label: Documento técnico alineado con el estado real del código
+        - label: Guía de experimentos reproducibles (plantilla + protocolos)
+        - label: Roadmap revisado con hitos claros (MVP → v1)
+  - type: checkboxes
+    id: verificacion
+    attributes:
+      label: Verificación (antes de cerrar)
+      options:
+        - label: Lint pasa (ruff)
+        - label: Tests pasan (pytest)
+        - label: Smoke manual (API + UI + export) verificado
   - type: textarea
     id: subtareas
     attributes:
