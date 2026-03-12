@@ -577,15 +577,18 @@ class MainWindow(QMainWindow):
         self.ai_out = QTextEdit()
         self.ai_out.setReadOnly(True)
         btn_ai_run_run = QPushButton("IA sobre run")
+        btn_ai_run_series = QPushButton("IA sobre serie")
         btn_ai_run_ds = QPushButton("IA sobre dataset")
         btn_ai_models = QPushButton("ModelRuns")
         btn_ai_run_run.clicked.connect(self.ai_run_on_run)
+        btn_ai_run_series.clicked.connect(self.ai_run_on_run_series)
         btn_ai_run_ds.clicked.connect(self.ai_run_on_dataset)
         btn_ai_models.clicked.connect(self.ai_list_models)
         row = QHBoxLayout()
         row.addWidget(QLabel("Método"))
         row.addWidget(self.ai_method)
         row.addWidget(btn_ai_run_run)
+        row.addWidget(btn_ai_run_series)
         row.addWidget(btn_ai_run_ds)
         row.addWidget(btn_ai_models)
         lay = QVBoxLayout()
@@ -600,6 +603,21 @@ class MainWindow(QMainWindow):
                 "/ai/run-on-run",
                 {"run_id": run_id, "method": self.ai_method.currentText()},
                 timeout=40,
+            )
+            self.ai_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self.ai_out.setPlainText(str(e))
+
+    def ai_run_on_run_series(self):
+        win, ok = QInputDialog.getInt(self, "IA sobre serie", "ventana", 1, 1, 1000, 1)
+        if not ok:
+            return
+        try:
+            run_id = int(self.run_id.value())
+            o = self.http_post_json(
+                "/ai/run-on-run-series",
+                {"run_id": run_id, "method": self.ai_method.currentText(), "window": win},
+                timeout=60,
             )
             self.ai_out.setPlainText(json.dumps(o, ensure_ascii=False, indent=2))
         except Exception as e:
@@ -1109,18 +1127,12 @@ class MainWindow(QMainWindow):
     def export_series_metrics_csv(self):
         try:
             run_id = int(self.run_id.value())
-            o = json.loads(self.http_get_text(f"/figures/{run_id}/series-metrics", timeout=30))
-            if int(o.get("length", 0)) == 0:
-                QMessageBox.information(self, "CSV", "No hay series métricas disponibles")
-                return
             path, _ = QFileDialog.getSaveFileName(self, "Guardar métricas CSV", f"metrics_{run_id}.csv", "CSV (*.csv)")
             if not path:
                 return
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                w.writerow(["frame", "energy", "mean", "variance", "spatial_corr"])
-                for i, m in enumerate(o["series"]):
-                    w.writerow([i, m.get("energy"), m.get("mean"), m.get("variance"), m.get("spatial_corr")])
+            data = self.http_get(f"/figures/{run_id}/series-metrics.csv", timeout=40)
+            with open(path, "wb") as f:
+                f.write(data)
             QMessageBox.information(self, "CSV", f"Guardado en {path}")
         except urllib.error.URLError as e:
             QMessageBox.warning(self, "Error", f"No se pudo conectar al API: {e}")

@@ -11,12 +11,11 @@
 - Documentación inicial: `docs/*`, `README.md`, `ROADMAP.md`
 
 **Parcial**
-- Trazabilidad completa: existe `Artifact`/`Figure` y se registran ETL/IA; falta cerrar “registrar todo lo generado” (p.ej. reportes/figuras derivadas)
-- Endurecimiento API: validación homogénea, límites de payload y seguridad mínima si se expone fuera de localhost
+- Visualizaciones rápidas (PCA/plots) aún no integradas con el flujo de runs/datasets
 
 **Pendiente (para v1)**
-- IA avanzada sobre series/ventanas (no solo snapshot) y guardado de modelos entrenados
-- Validaciones de estabilidad más estrictas (dt/lam/diff/noise) y límites explícitos en UI/API
+- Guardado de modelos entrenados y sus artefactos (versionado / descarga)
+- Validaciones de estabilidad más estrictas (dt/lam/diff/noise) y límites explícitos en UI
 - DevOps de despliegue (si el objetivo es producción): configuración y guía operativa
 
 ## Checklist (MVP → v1)
@@ -31,15 +30,15 @@
 ### API
 - [x] Endpoints de comparación run↔run y run↔dataset (métricas + figuras)
 - [x] Consolidar endpoints de reportes (run y experimento) con enlaces a figuras embebidas
-- [ ] Validación y errores homogéneos (pydantic + HTTP errors consistentes)
-- [ ] Política de timeouts/limitación de payloads (especialmente descargas)
-- [ ] Seguridad mínima si aplica (rate limit/auth para despliegue fuera de localhost)
+- [x] Validación y errores homogéneos (pydantic + HTTP errors consistentes)
+- [x] Política de timeouts/limitación de payloads (especialmente descargas)
+- [x] Seguridad mínima si aplica (rate limit/auth para despliegue fuera de localhost)
 
 ### Simulación / Cálculos / Métricas
-- [ ] Validaciones de estabilidad (dt/lam/diff/noise) y límites en UI/API
+- [x] Validaciones de estabilidad (dt/lam/diff/noise) y límites en UI/API
 - [ ] Métricas comparativas (distancias, correlación, similitud estructural)
 - [ ] Barridos de parámetros reproducibles y registro de configuraciones
-- [ ] Serie temporal: métricas por frame y export consistente (API/UI)
+- [x] Serie temporal: métricas por frame y export consistente (API/UI)
 
 ### Datos / ETL
 - [x] ETL con normalizaciones (z-score/min-max) y features mejoradas (ventanas/espectral)
@@ -49,8 +48,8 @@
 
 ### IA
 - [x] Formalizar “ModelRun” end-to-end (params, métricas, estado, outputs)
-- [ ] IA sobre series/ventanas (no solo snapshots) con pipelines reproducibles
-- [ ] Guardado de artefactos (CSV/figuras/modelos) y descarga segura
+- [x] IA sobre series/ventanas (no solo snapshots) con pipelines reproducibles
+- [x] Guardado de artefactos (CSV/figuras/modelos) y descarga segura
 - [ ] Visualizaciones rápidas (PCA/plots) integradas con el flujo de runs/datasets
 
 ### Reportes / Visualización
@@ -60,8 +59,8 @@
 
 ### Core / DB
 - [x] Añadir migraciones (Alembic u otro) para evolucionar el esquema sin hacks
-- [ ] Registrar sistemáticamente artefactos (ETL/IA/reportes) en la tabla `artifacts`
-- [ ] Guardar configuración completa de runs y seeds para reproducibilidad
+- [x] Registrar sistemáticamente artefactos (ETL/IA/reportes) en la tabla `artifacts`
+- [x] Guardar configuración completa de runs y seeds para reproducibilidad
 
 ### DevOps / CI
 - [ ] Docker Compose verificado (API+Redis+Postgres) y variables de entorno validadas

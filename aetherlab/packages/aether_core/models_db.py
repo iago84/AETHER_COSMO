@@ -38,6 +38,8 @@ class SimulationRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     snapshot_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    seed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     experiment: Mapped["Experiment"] = relationship(back_populates="runs")
 
 
@@ -67,10 +69,12 @@ class Artifact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("simulation_runs.id"), nullable=True)
     dataset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("datasets.id"), nullable=True)
+    experiment_id: Mapped[Optional[int]] = mapped_column(ForeignKey("experiments.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(100), nullable=False)
     path: Mapped[str] = mapped_column(String(500), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     run: Mapped["SimulationRun"] = relationship()
+    experiment: Mapped[Optional["Experiment"]] = relationship()
 
 
 class Figure(Base):

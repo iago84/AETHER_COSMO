@@ -67,11 +67,23 @@ def ensure_schema():
                 def m_modelrun_params():
                     _sqlite_add_col("model_runs", "params_json", "params_json TEXT NULL")
 
+                def m_run_seed():
+                    _sqlite_add_col("simulation_runs", "seed", "seed INTEGER NULL")
+
+                def m_run_config():
+                    _sqlite_add_col("simulation_runs", "config_json", "config_json TEXT NULL")
+
+                def m_artifact_experiment():
+                    _sqlite_add_col("artifacts", "experiment_id", "experiment_id INTEGER NULL")
+
                 migrations.extend(
                     [
                         ("2026_03_12_simulation_runs_job_id", m_job_id),
+                        ("2026_03_12_simulation_runs_seed", m_run_seed),
+                        ("2026_03_12_simulation_runs_config_json", m_run_config),
                         ("2026_03_12_model_runs_params_json", m_modelrun_params),
                         ("2026_03_12_model_runs_metrics_json", m_modelrun_metrics),
+                        ("2026_03_12_artifacts_experiment_id", m_artifact_experiment),
                     ]
                 )
                 for mid, fn in migrations:
@@ -103,6 +115,18 @@ def ensure_schema():
                         ],
                     ),
                     (
+                        "2026_03_12_simulation_runs_seed",
+                        [
+                            "ALTER TABLE IF EXISTS simulation_runs ADD COLUMN IF NOT EXISTS seed INTEGER",
+                        ],
+                    ),
+                    (
+                        "2026_03_12_simulation_runs_config_json",
+                        [
+                            "ALTER TABLE IF EXISTS simulation_runs ADD COLUMN IF NOT EXISTS config_json TEXT",
+                        ],
+                    ),
+                    (
                         "2026_03_12_model_runs_params_json",
                         [
                             "ALTER TABLE IF EXISTS model_runs ADD COLUMN IF NOT EXISTS params_json TEXT",
@@ -112,6 +136,12 @@ def ensure_schema():
                         "2026_03_12_model_runs_metrics_json",
                         [
                             "ALTER TABLE IF EXISTS model_runs ADD COLUMN IF NOT EXISTS metrics_json TEXT",
+                        ],
+                    ),
+                    (
+                        "2026_03_12_artifacts_experiment_id",
+                        [
+                            "ALTER TABLE IF EXISTS artifacts ADD COLUMN IF NOT EXISTS experiment_id INTEGER",
                         ],
                     ),
                 ]

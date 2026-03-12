@@ -5,14 +5,16 @@ import io
 import os
 import time
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Response
+from fastapi.exceptions import RequestValidationError
 from matplotlib.figure import Figure
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, JSONResponse
 
 from aetherlab.packages.aether_core.db import ENGINE, SessionLocal, ensure_schema
 from aetherlab.packages.aether_core.models_db import (
@@ -48,6 +50,28 @@ from aetherlab.packages.aether_report.builder import build_run_html
 from .db import get_session
 
 app = FastAPI(title="AETHERLAB API", version="0.1.0")
+_API_KEY = os.environ.get("AETHERLAB_API_KEY")
+
+
+@app.middleware("http")
+async def api_key_middleware(request, call_next):
+    if _API_KEY and request.method in ("POST", "PUT", "DELETE"):
+        if request.headers.get("X-API-Key") != _API_KEY:
+            return JSONResponse(status_code=401, content={"detail": "unauthorized"})
+    return await call_next(request)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "validation_error", "errors": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc: Exception):
+    return JSONResponse(status_code=500, content={"detail": "internal_error"})
 
 
 @app.on_event("startup")
@@ -142,29 +166,42 @@ def status(sim_id: str):
 
 class SimpleSimRequest(BaseModel):
     experiment_id: int
-    nx: int = 128
-    ny: int = 128
-    steps: int = 100
-    dt: float = 0.05
-    lam: float = 0.5
-    diff: float = 0.2
-    noise: float = 0.0
-    boundary: str = "periodic"  # periodic | fixed | absorbing
-    source_kind: str = "gaussian_pulse"  # gaussian_pulse | periodic | stochastic | top_hat | lorentzian
-    cx: int = 64
-    cy: int = 64
-    sigma: float = 8.0
-    duration: int = 20
-    amplitude: float = 1.0
-    frequency: float | None = None
-    radius: float | None = None
-    gamma: float | None = None
+    nx: int = Field(default=128, ge=8, le=2048)
+    ny: int = Field(default=128, ge=8, le=2048)
+    steps: int = Field(default=100, ge=1, le=200000)
+    dt: float = Field(default=0.05, gt=0.0, le=1.0)
+    lam: float = Field(default=0.5, ge=0.0, le=10.0)
+    diff: float = Field(default=0.2, ge=0.0, le=10.0)
+    noise: float = Field(default=0.0, ge=0.0, le=10.0)
+    seed: int | None = Field(default=None, ge=0, le=2_147_483_647)
+    boundary: Literal["periodic", "fixed", "absorbing"] = "periodic"
+    source_kind: Literal["gaussian_pulse", "periodic", "stochastic", "top_hat", "lorentzian"] = "gaussian_pulse"
+    cx: int = Field(default=64, ge=0, le=4096)
+    cy: int = Field(default=64, ge=0, le=4096)
+    sigma: float = Field(default=8.0, gt=0.0, le=10_000.0)
+    duration: int = Field(default=20, ge=1, le=1_000_000)
+    amplitude: float = Field(default=1.0, ge=0.0, le=10_000.0)
+    frequency: float | None = Field(default=None, gt=0.0, le=10_000.0)
+    radius: float | None = Field(default=None, gt=0.0, le=10_000.0)
+    gamma: float | None = Field(default=None, gt=0.0, le=10_000.0)
     save_series: bool = False
-    series_stride: int = 10
+    series_stride: int = Field(default=10, ge=1, le=100000)
+
+
+def _validate_sim_stability(payload: SimpleSimRequest):
+    if payload.dt * payload.diff > 1.0:
+        raise HTTPException(status_code=400, detail="unstable params: dt*diff too large")
+    if payload.dt * payload.lam > 1.0:
+        raise HTTPException(status_code=400, detail="unstable params: dt*lam too large")
+    if payload.noise > 0.0 and payload.dt * payload.noise > 1.0:
+        raise HTTPException(status_code=400, detail="unstable params: dt*noise too large")
+    if payload.cx >= payload.nx or payload.cy >= payload.ny:
+        raise HTTPException(status_code=400, detail="source center out of bounds")
 
 
 @app.post("/simulate/simple")
 def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session)):
+    _validate_sim_stability(payload)
     sim = Simulator2D(
         nx=payload.nx,
         ny=payload.ny,
@@ -173,7 +210,7 @@ def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session
         lam=payload.lam,
         diff=payload.diff,
         noise=payload.noise,
-        seed=123,
+        seed=payload.seed or 123,
         boundary=payload.boundary,
     )  # type: ignore[arg-type]
     if payload.source_kind == "gaussian_pulse":
@@ -238,7 +275,13 @@ def simulate_simple(payload: SimpleSimRequest, db: Session = Depends(get_session
     if payload.save_series and frames:
         series_path = out_path.with_suffix(".npz")
         np.savez_compressed(series_path.as_posix(), frames=np.array(frames, dtype=np.float32))
-    run = SimulationRun(experiment_id=payload.experiment_id, status="finished", snapshot_path=out_path.as_posix())
+    run = SimulationRun(
+        experiment_id=payload.experiment_id,
+        status="finished",
+        snapshot_path=out_path.as_posix(),
+        seed=payload.seed,
+        config_json=json.dumps(payload.model_dump(), ensure_ascii=False),
+    )
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -262,6 +305,7 @@ def list_runs(
             "status": r.status,
             "snapshot_path": r.snapshot_path,
             "created_at": str(r.created_at),
+            "seed": getattr(r, "seed", None),
         }
         for r in rows
     ]
@@ -302,6 +346,8 @@ def get_run(run_id: int, db: Session = Depends(get_session)):
         "created_at": str(obj.created_at),
         "backend": backend,
         "job_id": job_id,
+        "seed": getattr(obj, "seed", None),
+        "config": json.loads(obj.config_json) if getattr(obj, "config_json", None) else None,
     }
 
 
@@ -315,6 +361,12 @@ def _background_simulation(run_id: int, payload: AsyncSimRequest):
         run = db.get(SimulationRun, run_id)
         if run is None:
             return
+        try:
+            _validate_sim_stability(payload)
+        except HTTPException:
+            run.status = "failed"
+            db.commit()
+            return
         run.status = "running"
         db.commit()
         sim = Simulator2D(
@@ -325,7 +377,7 @@ def _background_simulation(run_id: int, payload: AsyncSimRequest):
             lam=payload.lam,
             diff=payload.diff,
             noise=payload.noise,
-            seed=123,
+            seed=payload.seed or 123,
             boundary=payload.boundary,
         )  # type: ignore[arg-type]
         if payload.source_kind == "gaussian_pulse":
@@ -407,8 +459,15 @@ def _background_simulation(run_id: int, payload: AsyncSimRequest):
 
 @app.post("/simulate/async")
 def simulate_async(payload: AsyncSimRequest, background: BackgroundTasks, db: Session = Depends(get_session)):
+    _validate_sim_stability(payload)
     use_rq = bool(os.environ.get("REDIS_URL"))
-    run = SimulationRun(experiment_id=payload.experiment_id, status="queued", snapshot_path=None)
+    run = SimulationRun(
+        experiment_id=payload.experiment_id,
+        status="queued",
+        snapshot_path=None,
+        seed=payload.seed,
+        config_json=json.dumps(payload.model_dump(), ensure_ascii=False),
+    )
     db.add(run)
     db.commit()
     db.refresh(run)
@@ -555,11 +614,33 @@ def series_mp4(run_id: int, db: Session = Depends(get_session)):
     out_dir = root / "aetherlab" / "data" / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"series_{run_id}.mp4"
-    try:
-        writer = animation.FFMpegWriter(fps=10)
-        ani.save(out_path.as_posix(), writer=writer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ffmpeg not available: {e}")
+    if not out_path.exists():
+        try:
+            writer = animation.FFMpegWriter(fps=10)
+            ani.save(out_path.as_posix(), writer=writer)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"ffmpeg not available: {e}")
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.kind == "series_mp4",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                experiment_id=obj.experiment_id,
+                kind="series_mp4",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
     return FileResponse(out_path)
 
 @app.get("/figures/{run_id}/field")
@@ -585,6 +666,53 @@ def download_series_metrics(run_id: int, db: Session = Depends(get_session)):
     frames = z["frames"]
     series = [compute_metrics(fr) for fr in frames]
     return {"length": len(series), "series": series}
+
+
+@app.get("/figures/{run_id}/series-metrics.csv")
+def download_series_metrics_csv(run_id: int, db: Session = Depends(get_session)):
+    obj = db.get(SimulationRun, run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="snapshot not found")
+    p = Path(obj.snapshot_path).with_suffix(".npz")
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="series not found")
+    z = np.load(p.as_posix())
+    frames = z["frames"]
+    series = [compute_metrics(fr) for fr in frames]
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    body = io.StringIO()
+    body.write("index,energy,mean,variance,spatial_corr\n")
+    for i, m in enumerate(series):
+        body.write(f"{i},{m['energy']},{m['mean']},{m['variance']},{m['spatial_corr']}\n")
+    csv_bytes = body.getvalue().encode("utf-8")
+    h = hashlib.sha256(csv_bytes).hexdigest()[:12]
+    out_path = out_dir / f"series_metrics_{run_id}_{h}.csv"
+    if not out_path.exists():
+        out_path.write_bytes(csv_bytes)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.kind == "series_metrics_csv",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                experiment_id=obj.experiment_id,
+                kind="series_metrics_csv",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
+    return FileResponse(out_path, media_type="text/csv", filename=out_path.name)
 
 
 def _load_field_for_run(obj: SimulationRun) -> np.ndarray:
@@ -734,9 +862,17 @@ class OutlierScoreRequest(BaseModel):
     random_state: int | None = 0
 
 
+def _validate_matrix_payload(X: np.ndarray) -> np.ndarray:
+    if X.ndim != 2:
+        raise HTTPException(status_code=400, detail="X must be 2D")
+    if X.shape[0] > 200000 or X.shape[1] > 2048 or X.size > 2000000:
+        raise HTTPException(status_code=413, detail="X too large")
+    return X
+
+
 @app.post("/ai/outlier-score")
 def ai_outlier_score(payload: OutlierScoreRequest):
-    X = np.asarray(payload.X, dtype=np.float32)
+    X = _validate_matrix_payload(np.asarray(payload.X, dtype=np.float32))
     if payload.method == "isoforest":
         s = isolation_forest_score(X, random_state=payload.random_state or 0)
     elif payload.method == "mean_dist":
@@ -755,7 +891,7 @@ class DbscanRequest(BaseModel):
 
 @app.post("/ai/dbscan")
 def ai_dbscan(payload: DbscanRequest):
-    X = np.asarray(payload.X, dtype=np.float32)
+    X = _validate_matrix_payload(np.asarray(payload.X, dtype=np.float32))
     labels = dbscan_labels(X, eps=payload.eps, min_samples=payload.min_samples, metric=payload.metric)  # type: ignore[arg-type]
     return {"labels": labels.tolist()}
 
@@ -767,7 +903,7 @@ class HdbscanRequest(BaseModel):
 
 @app.post("/ai/hdbscan")
 def ai_hdbscan(payload: HdbscanRequest):
-    X = np.asarray(payload.X, dtype=np.float32)
+    X = _validate_matrix_payload(np.asarray(payload.X, dtype=np.float32))
     import hdbscan  # noqa: WPS433
     algo = hdbscan.HDBSCAN(
         min_cluster_size=payload.min_cluster_size,
@@ -1029,18 +1165,26 @@ def get_model_run(model_run_id: int, db: Session = Depends(get_session)):
 
 
 @app.get("/artifacts")
-def list_artifacts(run_id: int | None = None, dataset_id: int | None = None, db: Session = Depends(get_session)):
+def list_artifacts(
+    run_id: int | None = None,
+    dataset_id: int | None = None,
+    experiment_id: int | None = None,
+    db: Session = Depends(get_session),
+):
     stmt = select(Artifact).order_by(Artifact.id.desc())
     if run_id is not None:
         stmt = stmt.where(Artifact.run_id == run_id)
     if dataset_id is not None:
         stmt = stmt.where(Artifact.dataset_id == dataset_id)
+    if experiment_id is not None:
+        stmt = stmt.where(Artifact.experiment_id == experiment_id)
     rows = db.execute(stmt).scalars().all()
     return [
         {
             "id": a.id,
             "run_id": a.run_id,
             "dataset_id": a.dataset_id,
+            "experiment_id": getattr(a, "experiment_id", None),
             "kind": a.kind,
             "path": a.path,
             "created_at": str(a.created_at),
@@ -1058,6 +1202,7 @@ def get_artifact(artifact_id: int, db: Session = Depends(get_session)):
         "id": a.id,
         "run_id": a.run_id,
         "dataset_id": a.dataset_id,
+        "experiment_id": getattr(a, "experiment_id", None),
         "kind": a.kind,
         "path": a.path,
         "created_at": str(a.created_at),
@@ -1156,6 +1301,85 @@ def ai_run_on_run(payload: AiRunOnRunRequest, db: Session = Depends(get_session)
     db.add(art)
     db.commit()
     return {"path": out_path.as_posix(), "model_run_id": mr.id, "artifact_path": art.path}
+
+
+class AiRunOnRunSeriesRequest(BaseModel):
+    run_id: int
+    method: str = "isoforest"
+    window: int = Field(default=1, ge=1, le=1000)
+
+
+@app.post("/ai/run-on-run-series")
+def ai_run_on_run_series(payload: AiRunOnRunSeriesRequest, db: Session = Depends(get_session)):
+    obj = db.get(SimulationRun, payload.run_id)
+    if obj is None or not obj.snapshot_path:
+        raise HTTPException(status_code=404, detail="run not found")
+    snap = Path(obj.snapshot_path)
+    npz = snap.with_suffix(".npz")
+    if not npz.exists():
+        raise HTTPException(status_code=400, detail="series not found; run with save_series=true")
+    try:
+        z = np.load(npz.as_posix())
+        frames = z["frames"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid series file")
+    metrics_list = [compute_metrics(fr) for fr in frames]
+    feats = np.asarray(
+        [[m["energy"], m["mean"], m["variance"], m["spatial_corr"]] for m in metrics_list],
+        dtype=np.float32,
+    )
+    index_offset = 0
+    if payload.window > 1 and feats.shape[0] >= payload.window:
+        k = payload.window
+        c = np.cumsum(feats, axis=0)
+        wsum = c[k - 1 :] - np.concatenate([np.zeros((1, feats.shape[1]), dtype=np.float32), c[:-k]], axis=0)
+        feats = wsum / float(k)
+        index_offset = k - 1
+    if payload.method == "isoforest":
+        s = isolation_forest_score(feats)
+    elif payload.method == "mean_dist":
+        s = pca_outlier_score(feats)
+    else:
+        raise HTTPException(status_code=400, detail="unknown method")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = int(time.time())
+    out_path = out_dir / f"ai_series_{obj.id}_{stamp}.csv"
+    with open(out_path.as_posix(), "w", encoding="utf-8") as f:
+        f.write("index,score,energy,mean,variance,spatial_corr\n")
+        for i, (score, m) in enumerate(zip(s.tolist(), metrics_list[index_offset:], strict=False)):
+            f.write(
+                f"{i + index_offset},{score},{m['energy']},{m['mean']},{m['variance']},{m['spatial_corr']}\n"
+            )
+    score_stats = {
+        "n": int(s.size),
+        "mean": float(np.mean(s)),
+        "std": float(np.std(s)),
+        "min": float(np.min(s)),
+        "max": float(np.max(s)),
+        "window": int(payload.window),
+        "path": out_path.as_posix(),
+    }
+    mr = ModelRun(
+        experiment_id=obj.experiment_id,
+        model_name=f"{payload.method}_series",
+        params_json=json.dumps({"window": int(payload.window)}, ensure_ascii=False),
+        status="finished",
+        metrics_json=json.dumps(score_stats),
+    )
+    db.add(mr)
+    db.commit()
+    db.refresh(mr)
+    art = Artifact(run_id=obj.id, experiment_id=obj.experiment_id, kind="ai_series_scores", path=out_path.as_posix())
+    db.add(art)
+    db.commit()
+    return {
+        "path": out_path.as_posix(),
+        "model_run_id": mr.id,
+        "artifact_id": art.id,
+        "artifact_path": art.path,
+    }
 
 
 class AiRunOnDatasetRequest(BaseModel):
@@ -1289,6 +1513,34 @@ def report_run_html(run_id: int, crop: int = Query(default=64, ge=8, le=512), db
         series_metrics=series_metrics,
         title=f"Reporte Run {run_id}",
     )
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(html.encode("utf-8")).hexdigest()[:12]
+    out_path = out_dir / f"report_run_{run_id}_{h}.html"
+    if not out_path.exists():
+        out_path.write_text(html, encoding="utf-8")
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.kind == "report_html_run",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                experiment_id=obj.experiment_id,
+                kind="report_html_run",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
     return Response(content=html, media_type="text/html")
 
 @app.get("/reports/experiment/{exp_id}/html")
@@ -1339,6 +1591,35 @@ def report_experiment_html(exp_id: int, db: Session = Depends(get_session)):
         f"<h2>Runs</h2><div class='grid'>{''.join(cards) if cards else '<p>Sin snapshots</p>'}</div>"
         "</body></html>"
     )
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(html.encode("utf-8")).hexdigest()[:12]
+    out_path = out_dir / f"report_experiment_{exp_id}_{h}.html"
+    if not out_path.exists():
+        out_path.write_text(html, encoding="utf-8")
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.experiment_id == exp_id,
+                Artifact.kind == "report_html_experiment",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=None,
+                dataset_id=None,
+                experiment_id=exp_id,
+                kind="report_html_experiment",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
     return Response(content=html, media_type="text/html")
 
 
@@ -1468,6 +1749,34 @@ def compare_run_run_figure(run_a: int, run_b: int, db: Session = Depends(get_ses
     ua = _load_field_for_run(a)
     ub = _load_field_for_run(b)
     png = _compare_figure_png(ua, ub, title=f"Run {run_a} vs Run {run_b}")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(png).hexdigest()[:12]
+    out_path = out_dir / f"compare_run_run_{run_a}_{run_b}_{h}.png"
+    if not out_path.exists():
+        out_path.write_bytes(png)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_a,
+                Artifact.kind == "compare_run_run_png",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_a,
+                experiment_id=a.experiment_id,
+                kind="compare_run_run_png",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
     return Response(content=png, media_type="image/png")
 
 
@@ -1497,6 +1806,36 @@ def compare_run_dataset_figure(run_id: int, dataset_id: int, db: Session = Depen
     p = _safe_data_path(Path(ds.path))
     arr = _load_dataset_array(p)
     png = _compare_figure_png(ua, arr, title=f"Run {run_id} vs Dataset {dataset_id}")
+    root = Path(__file__).resolve().parents[3]
+    out_dir = root / "aetherlab" / "data" / "outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    h = hashlib.sha256(png).hexdigest()[:12]
+    out_path = out_dir / f"compare_run_dataset_{run_id}_{dataset_id}_{h}.png"
+    if not out_path.exists():
+        out_path.write_bytes(png)
+    existing = (
+        db.execute(
+            select(Artifact).where(
+                Artifact.run_id == run_id,
+                Artifact.dataset_id == dataset_id,
+                Artifact.kind == "compare_run_dataset_png",
+                Artifact.path == out_path.as_posix(),
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is None:
+        db.add(
+            Artifact(
+                run_id=run_id,
+                dataset_id=dataset_id,
+                experiment_id=r.experiment_id,
+                kind="compare_run_dataset_png",
+                path=out_path.as_posix(),
+            )
+        )
+        db.commit()
     return Response(content=png, media_type="image/png")
 
 @app.post("/data/cleanup")
