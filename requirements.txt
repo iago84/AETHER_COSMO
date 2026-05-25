@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 pydantic>=2.0
-SQLAlchemy>=2.0
+SQLAlchemy>=2.0.50
 numpy
 matplotlib
 PyQt6
